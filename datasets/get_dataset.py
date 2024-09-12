@@ -6,7 +6,6 @@ from datasets.shapes_ds import generate_shape_dataset_torch
 from datasets.balls_ds import Balls, BallsImage
 from datasets.obj3d_ds import Obj3D, Obj3DImage
 from datasets.phyre_ds import PhyreDataset, PhyreDatasetImage
-from datasets.langtable_ds import LanguageTableDataset, LanguageTableDatasetImage
 
 
 def get_video_dataset(ds, root, seq_len=1, mode='train', image_size=128):
