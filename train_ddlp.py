@@ -63,6 +63,8 @@ def train_ddlp(config_path='./configs/balls.json'):
         device = torch.device(f'{device}' if torch.cuda.is_available() else 'cpu')
     else:
         device = torch.device('cpu')
+    torch.set_float32_matmul_precision('medium')
+
     # model
     timestep_horizon = config['timestep_horizon']
     kp_range = config['kp_range']
