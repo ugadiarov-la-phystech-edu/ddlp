@@ -1,4 +1,5 @@
 # datasets
+from datasets.episodes_dataset import EpisodesDataset
 from datasets.traffic_ds import TrafficDataset, TrafficDatasetImage
 from datasets.clevrer_ds import CLEVREREpDataset, CLEVREREpDatasetImage
 from datasets.shapes_ds import generate_shape_dataset_torch
@@ -25,6 +26,8 @@ def get_video_dataset(ds, root, seq_len=1, mode='train', image_size=128):
         dataset = PhyreDataset(root=root, mode=mode, sample_length=seq_len, image_size=image_size)
     elif ds == 'langtable':
         dataset = LanguageTableDataset(root=root, mode=mode, sample_length=seq_len, image_size=image_size)
+    elif ds == 'episodes_dataset':
+        dataset = EpisodesDataset(root=root, mode=mode, sample_length=seq_len, res=image_size)
     else:
         raise NotImplementedError
     return dataset
@@ -53,6 +56,8 @@ def get_image_dataset(ds, root, mode='train', image_size=128, seq_len=1):
             dataset = generate_shape_dataset_torch(img_size=image_size, num_images=2_000)
     elif ds == 'langtable':
         dataset = LanguageTableDatasetImage(root=root, mode=mode, sample_length=seq_len, image_size=image_size)
+    elif ds == 'episodes_dataset':
+        raise NotImplementedError
     else:
         raise NotImplementedError
     return dataset
