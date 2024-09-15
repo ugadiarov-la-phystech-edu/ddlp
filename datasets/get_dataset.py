@@ -1,5 +1,5 @@
 # datasets
-from datasets.episodes_dataset import EpisodesDataset
+from datasets.episodes_dataset import EpisodesDataset, EpisodesDatasetImage
 from datasets.traffic_ds import TrafficDataset, TrafficDatasetImage
 from datasets.clevrer_ds import CLEVREREpDataset, CLEVREREpDatasetImage
 from datasets.shapes_ds import generate_shape_dataset_torch
@@ -56,7 +56,7 @@ def get_image_dataset(ds, root, mode='train', image_size=128, seq_len=1):
     elif ds == 'langtable':
         dataset = LanguageTableDatasetImage(root=root, mode=mode, sample_length=seq_len, image_size=image_size)
     elif ds == 'episodes_dataset':
-        raise NotImplementedError
+        dataset = EpisodesDatasetImage(root=root, mode=mode, sample_length=seq_len, res=image_size)
     else:
         raise NotImplementedError
     return dataset
