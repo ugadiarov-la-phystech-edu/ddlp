@@ -50,6 +50,9 @@ def train_dlp(config_path='./configs/shapes.json'):
     weight_decay = config['weight_decay']
     iou_thresh = config['iou_thresh']  # threshold for NMS for plotting bounding boxes
     run_prefix = config['run_prefix']
+    if run_prefix == '':
+        run_prefix = os.path.splitext(os.path.basename(config_path))[0]
+
     load_model = config['load_model']
     pretrained_path = config['pretrained_path']  # path of pretrained model to load, if None, train from scratch
     adam_betas = config['adam_betas']
@@ -61,6 +64,8 @@ def train_dlp(config_path='./configs/shapes.json'):
         device = torch.device(f'{device}' if torch.cuda.is_available() else 'cpu')
     else:
         device = torch.device('cpu')
+    torch.set_float32_matmul_precision('medium')
+
     # model
     kp_range = config['kp_range']
     kp_activation = config['kp_activation']
@@ -112,7 +117,7 @@ def train_dlp(config_path='./configs/shapes.json'):
                       enable_enc_attn=enable_enc_attn, filtering_heuristic=filtering_heuristic).to(device)
     print(model.info())
     # prepare saving location
-    run_name = f'{ds}_dlp' + run_prefix
+    run_name = f'{ds}_dlp_' + run_prefix
     log_dir = prepare_logdir(runname=run_name, src_dir='./')
     fig_dir = os.path.join(log_dir, 'figures')
     save_dir = os.path.join(log_dir, 'saves')
