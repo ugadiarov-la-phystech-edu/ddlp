@@ -868,7 +868,7 @@ def save(model, optimizer, scheduler, epoch, path):
 
 def wandb_log(config, logdir, *args, **kwargs):
     if wandb.run is None:
-        wandb.init(project=config.wandb_project, group=config.wandb_group, name=config.wandb_run_name, dir=logdir)
+        wandb.init(project=config['wandb_project'], group=config['wandb_group'], name=config['wandb_run_name'], dir=logdir)
 
     wandb.log(*args, **kwargs)
 
