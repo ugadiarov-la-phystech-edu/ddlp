@@ -18,7 +18,7 @@ import torch.optim as optim
 # modules
 from models import ObjectDLP
 # datasets
-from datasets.get_dataset import get_image_dataset
+from datasets.get_dataset import get_image_dataset, get_video_dataset
 # util functions
 from utils.util_func import plot_keypoints_on_image_batch, prepare_logdir, save_config, log_line, \
     plot_bb_on_image_batch_from_z_scale_nms, plot_bb_on_image_batch_from_masks_nms, get_config
@@ -72,6 +72,7 @@ def train_dlp(config_path='./configs/shapes.json'):
     torch.set_float32_matmul_precision('medium')
 
     # model
+    timestep_horizon = config['timestep_horizon']
     kp_range = config['kp_range']
     kp_activation = config['kp_activation']
     enc_channels = config['enc_channels']
@@ -106,7 +107,10 @@ def train_dlp(config_path='./configs/shapes.json'):
     obj_on_beta = config['obj_on_beta']  # transparency beta distribution "b"
 
     # load data
-    dataset = get_image_dataset(ds, root, mode='train', image_size=image_size)
+    if timestep_horizon > 0:
+        dataset = get_video_dataset(ds, root, seq_len=timestep_horizon + 1, mode='train', image_size=image_size)
+    else:
+        dataset = get_image_dataset(ds, root, mode='train', image_size=image_size)
     dataloader = DataLoader(dataset, shuffle=True, batch_size=batch_size, num_workers=4, pin_memory=True,
                             drop_last=True)
     # model
