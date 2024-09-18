@@ -76,6 +76,8 @@ def evaluate_validation_elbo(model, config, epoch, batch_size=100, recon_loss_ty
 
         elbo = loss
         elbos.append(elbo.data.cpu().numpy())
+
+    result = {'valid_elbos': np.mean(elbos)}
     if save_image:
         max_imgs = 8
         mu_plot = mu_tot.clamp(min=kp_range[0], max=kp_range[1])
@@ -113,8 +115,11 @@ def evaluate_validation_elbo(model, config, epoch, batch_size=100, recon_loss_ty
                                                          kp_range=kp_range)
         dec_objects = model_output['dec_objects']
         bg = model_output['bg']
+        image_path = None
+        image_obj_path = None
         if accelerator is not None:
             if accelerator.is_main_process:
+                image_path = '{}/image_valid_{}.jpg'.format(fig_dir, epoch)
                 vutils.save_image(torch.cat([x[:max_imgs, -3:], img_with_kp[:max_imgs, -3:].to(accelerator.device),
                                              rec_x[:max_imgs, -3:],
                                              img_with_kp_p[:max_imgs, -3:].to(accelerator.device),
@@ -123,8 +128,7 @@ def evaluate_validation_elbo(model, config, epoch, batch_size=100, recon_loss_ty
                                              img_with_masks_nms[:max_imgs, -3:].to(accelerator.device),
                                              img_with_masks_alpha_nms[:max_imgs, -3:].to(accelerator.device),
                                              bg[:max_imgs, -3:]],
-                                            dim=0).data.cpu(), '{}/image_valid_{}.jpg'.format(fig_dir, epoch),
-                                  nrow=8, pad_value=1)
+                                            dim=0).data.cpu(), image_path, nrow=8, pad_value=1)
             with torch.no_grad():
                 _, dec_objects_rgb = torch.split(dec_objects_original, [1, 3], dim=2)
                 dec_objects_rgb = dec_objects_rgb.reshape(-1, *dec_objects_rgb.shape[2:])
@@ -138,11 +142,12 @@ def evaluate_validation_elbo(model, config, epoch, batch_size=100, recon_loss_ty
                                                              size=dec_objects_rgb.shape[-1],
                                                              align_corners=False, mode='bilinear')
             if accelerator.is_main_process:
+                image_obj_path = '{}/image_obj_valid_{}.jpg'.format(fig_dir, epoch)
                 vutils.save_image(
                     torch.cat([cropped_objects_original[:max_imgs * 2, -3:], dec_objects_rgb[:max_imgs * 2, -3:]],
-                              dim=0).data.cpu(), '{}/image_obj_valid_{}.jpg'.format(fig_dir, epoch),
-                    nrow=8, pad_value=1)
+                              dim=0).data.cpu(), image_obj_path, nrow=8, pad_value=1)
         else:
+            image_path = '{}/image_valid_{}.jpg'.format(fig_dir, epoch)
             vutils.save_image(torch.cat([x[:max_imgs, -3:], img_with_kp[:max_imgs, -3:].to(device),
                                          rec_x[:max_imgs, -3:],
                                          img_with_kp_p[:max_imgs, -3:].to(device),
@@ -151,8 +156,7 @@ def evaluate_validation_elbo(model, config, epoch, batch_size=100, recon_loss_ty
                                          img_with_masks_nms[:max_imgs, -3:].to(device),
                                          img_with_masks_alpha_nms[:max_imgs, -3:].to(device),
                                          bg[:max_imgs, -3:]],
-                                        dim=0).data.cpu(), '{}/image_valid_{}.jpg'.format(fig_dir, epoch),
-                              nrow=8, pad_value=1)
+                                        dim=0).data.cpu(), image_path, nrow=8, pad_value=1)
             with torch.no_grad():
                 _, dec_objects_rgb = torch.split(dec_objects_original, [1, 3], dim=2)
                 dec_objects_rgb = dec_objects_rgb.reshape(-1, *dec_objects_rgb.shape[2:])
@@ -165,10 +169,16 @@ def evaluate_validation_elbo(model, config, epoch, batch_size=100, recon_loss_ty
                     cropped_objects_original = F.interpolate(cropped_objects_original,
                                                              size=dec_objects_rgb.shape[-1],
                                                              align_corners=False, mode='bilinear')
+            image_obj_path = '{}/image_obj_valid_{}.jpg'.format(fig_dir, epoch)
             vutils.save_image(
                 torch.cat([cropped_objects_original[:max_imgs * 2, -3:], dec_objects_rgb[:max_imgs * 2, -3:]],
-                          dim=0).data.cpu(), '{}/image_obj_valid_{}.jpg'.format(fig_dir, epoch),
-                nrow=8, pad_value=1)
+                          dim=0).data.cpu(), image_obj_path, nrow=8, pad_value=1)
+        if image_path is not None:
+            result['valid_image_path'] = image_path
+
+        if image_obj_path is not None:
+            result['valid_image_obj_path'] = image_obj_path
+
     return np.mean(elbos)
 
 
@@ -223,6 +233,8 @@ def evaluate_validation_elbo_dyn(model, config, epoch, batch_size=100, recon_los
 
         elbo = loss
         elbos.append(elbo.data.cpu().numpy())
+
+    result = {'elbos': np.mean(elbos)}
     if save_image:
         max_imgs = 8
         mu_plot = mu_tot.clamp(min=kp_range[0], max=kp_range[1])
@@ -260,8 +272,11 @@ def evaluate_validation_elbo_dyn(model, config, epoch, batch_size=100, recon_los
                                                          kp_range=kp_range)
         dec_objects = model_output['dec_objects']
         bg = model_output['bg']
+        image_path = None
+        image_obj_path = None
         if accelerator is not None:
             if accelerator.is_main_process:
+                image_path = '{}/image_valid_{}.jpg'.format(fig_dir, epoch)
                 vutils.save_image(torch.cat([x[:max_imgs, -3:], img_with_kp[:max_imgs, -3:].to(accelerator.device),
                                              rec_x[:max_imgs, -3:],
                                              img_with_kp_p[:max_imgs, -3:].to(accelerator.device),
@@ -270,8 +285,7 @@ def evaluate_validation_elbo_dyn(model, config, epoch, batch_size=100, recon_los
                                              img_with_masks_nms[:max_imgs, -3:].to(accelerator.device),
                                              img_with_masks_alpha_nms[:max_imgs, -3:].to(accelerator.device),
                                              bg[:max_imgs, -3:]],
-                                            dim=0).data.cpu(), '{}/image_valid_{}.jpg'.format(fig_dir, epoch),
-                                  nrow=8, pad_value=1)
+                                            dim=0).data.cpu(), image_path, nrow=8, pad_value=1)
             with torch.no_grad():
                 _, dec_objects_rgb = torch.split(dec_objects_original, [1, 3], dim=2)
                 dec_objects_rgb = dec_objects_rgb.reshape(-1, *dec_objects_rgb.shape[2:])
@@ -285,11 +299,12 @@ def evaluate_validation_elbo_dyn(model, config, epoch, batch_size=100, recon_los
                                                              size=dec_objects_rgb.shape[-1],
                                                              align_corners=False, mode='bilinear')
             if accelerator.is_main_process:
+                image_obj_path = '{}/image_obj_valid_{}.jpg'.format(fig_dir, epoch)
                 vutils.save_image(
                     torch.cat([cropped_objects_original[:max_imgs * 2, -3:], dec_objects_rgb[:max_imgs * 2, -3:]],
-                              dim=0).data.cpu(), '{}/image_obj_valid_{}.jpg'.format(fig_dir, epoch),
-                    nrow=8, pad_value=1)
+                              dim=0).data.cpu(), image_obj_path, nrow=8, pad_value=1)
         else:
+            image_path = '{}/image_valid_{}.jpg'.format(fig_dir, epoch)
             vutils.save_image(torch.cat([x[:max_imgs, -3:], img_with_kp[:max_imgs, -3:].to(device),
                                          rec_x[:max_imgs, -3:],
                                          img_with_kp_p[:max_imgs, -3:].to(device),
@@ -298,8 +313,7 @@ def evaluate_validation_elbo_dyn(model, config, epoch, batch_size=100, recon_los
                                          img_with_masks_nms[:max_imgs, -3:].to(device),
                                          img_with_masks_alpha_nms[:max_imgs, -3:].to(device),
                                          bg[:max_imgs, -3:]],
-                                        dim=0).data.cpu(), '{}/image_valid_{}.jpg'.format(fig_dir, epoch),
-                              nrow=8, pad_value=1)
+                                        dim=0).data.cpu(), image_path, nrow=8, pad_value=1)
             with torch.no_grad():
                 _, dec_objects_rgb = torch.split(dec_objects_original, [1, 3], dim=2)
                 dec_objects_rgb = dec_objects_rgb.reshape(-1, *dec_objects_rgb.shape[2:])
@@ -312,14 +326,22 @@ def evaluate_validation_elbo_dyn(model, config, epoch, batch_size=100, recon_los
                     cropped_objects_original = F.interpolate(cropped_objects_original,
                                                              size=dec_objects_rgb.shape[-1],
                                                              align_corners=False, mode='bilinear')
+            image_obj_path = '{}/image_obj_valid_{}.jpg'.format(fig_dir, epoch)
             vutils.save_image(
                 torch.cat([cropped_objects_original[:max_imgs * 2, -3:], dec_objects_rgb[:max_imgs * 2, -3:]],
-                          dim=0).data.cpu(), '{}/image_obj_valid_{}.jpg'.format(fig_dir, epoch),
-                nrow=8, pad_value=1)
-        animate_trajectory_ddlp(model, config, epoch, device=device, fig_dir=fig_dir, prefix='valid_',
+                          dim=0).data.cpu(), image_obj_path, nrow=8, pad_value=1)
+        if image_path is not None:
+            result['image_path'] = image_path
+
+        if image_obj_path is not None:
+            result['image_obj_path'] = image_obj_path
+
+        animation_paths = animate_trajectory_ddlp(model, config, epoch, device=device, fig_dir=fig_dir, prefix='valid_',
                                 timestep_horizon=animation_horizon, num_trajetories=1,
                                 accelerator=accelerator, train=False, cond_steps=cond_steps)
-    return np.mean(elbos)
+
+        result['animation_paths'] = animation_paths
+    return result
 
 
 def animate_trajectory_ddlp(model, config, epoch, device=torch.device('cpu'), fig_dir='./', timestep_horizon=3,
@@ -348,8 +370,10 @@ def animate_trajectory_ddlp(model, config, epoch, device=torch.device('cpu'), fi
                              bg_masks_from_fg=False, cond_steps=cond_steps)
         # preds: [bs, timestep_horizon, 3, im_size, im_size]
 
-    path = f'{prefix}e{epoch}_traj_anim_{i}.gif'
+    paths = []
     for i in range(num_trajetories):
+        path = f'{prefix}e{epoch}_traj_anim_{i}.gif'
+        paths.append(path)
         gt_traj = x_horizon[i].permute(0, 2, 3, 1).data.cpu().numpy()
         pred_traj = preds[i].permute(0, 2, 3, 1).data.cpu().numpy()
         if accelerator is not None:
@@ -361,4 +385,4 @@ def animate_trajectory_ddlp(model, config, epoch, device=torch.device('cpu'), fi
             animate_trajectories(gt_traj, pred_traj, path=os.path.join(fig_dir, path),
                                  duration=duration, rec_to_pred_t=cond_steps)
 
-    return path
+    return paths
