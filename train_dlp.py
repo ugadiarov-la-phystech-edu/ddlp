@@ -145,7 +145,7 @@ def train_dlp(config_path='./configs/shapes.json'):
             model.load_state_dict(checkpoint['model_state_dict'])
             optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
             scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
-            pretrained_epoch = checkpoint['epoch']
+            pretrained_epoch = checkpoint['epoch'] + 1
             print(f"loaded model from checkpoint: {pretrained_path}")
         except:
             print("model checkpoint not found")
