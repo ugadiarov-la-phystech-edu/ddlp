@@ -310,7 +310,7 @@ def train_ddlp(config_path='./configs/balls.json'):
         log_data = {'epoch': epoch, 'loss': losses[-1], 'rec': losses_rec[-1], 'kl': losses_kl[-1],
                           'kl_balance': kl_balance, 'kl_kp': losses_kl_kp[-1], 'kl_feat': losses_kl_feat[-1],
                           'kl_scale': losses_kl_scale[-1], 'kl_depth': losses_kl_depth[-1],
-                          'kl_obj_on': losses_kl_obj_on,
+                          'kl_obj_on': losses_kl_obj_on[-1],
                           'kl_dyn': losses_kl_dyn[-1], 'mu max': mu_tot.max(), 'mu min': mu_tot.min(),
                           'mu offset max': mu_offset.max(), 'mu offset min': mu_offset.min(),}
         log_data = {f'train/{key}': value for key, value in log_data.items()}
