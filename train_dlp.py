@@ -22,7 +22,7 @@ from models import ObjectDLP
 from datasets.get_dataset import get_image_dataset, get_video_dataset
 # util functions
 from utils.util_func import plot_keypoints_on_image_batch, prepare_logdir, save_config, log_line, \
-    plot_bb_on_image_batch_from_z_scale_nms, plot_bb_on_image_batch_from_masks_nms, get_config, save
+    plot_bb_on_image_batch_from_z_scale_nms, plot_bb_on_image_batch_from_masks_nms, get_config, save, wandb_log
 from eval.eval_model import evaluate_validation_elbo
 from eval.eval_gen_metrics import eval_dlp_im_metric
 
@@ -421,6 +421,7 @@ def train_dlp(config_path='./configs/shapes.json'):
                 torch.cuda.empty_cache()
             log_data.update({f'val/{key}': value for key, value in valid_log_data.items()})
 
+        wandb_log(config, log_dir, log_data)
         valid_losses.append(valid_loss)
         if eval_im_metrics:
             val_lpipss.append(val_lpips)
