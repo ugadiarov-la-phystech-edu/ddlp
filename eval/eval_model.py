@@ -347,14 +347,18 @@ def animate_trajectory_ddlp(model, config, epoch, device=torch.device('cpu'), fi
         preds = model.sample(x_horizon, num_steps=timestep_horizon - cond_steps, deterministic=deterministic,
                              bg_masks_from_fg=False, cond_steps=cond_steps)
         # preds: [bs, timestep_horizon, 3, im_size, im_size]
+
+    path = f'{prefix}e{epoch}_traj_anim_{i}.gif'
     for i in range(num_trajetories):
         gt_traj = x_horizon[i].permute(0, 2, 3, 1).data.cpu().numpy()
         pred_traj = preds[i].permute(0, 2, 3, 1).data.cpu().numpy()
         if accelerator is not None:
             if accelerator.is_main_process:
                 animate_trajectories(gt_traj, pred_traj,
-                                     path=os.path.join(fig_dir, f'{prefix}e{epoch}_traj_anim_{i}.gif'),
+                                     path=os.path.join(fig_dir, path),
                                      duration=duration, rec_to_pred_t=cond_steps)
         else:
-            animate_trajectories(gt_traj, pred_traj, path=os.path.join(fig_dir, f'{prefix}e{epoch}_traj_anim_{i}.gif'),
+            animate_trajectories(gt_traj, pred_traj, path=os.path.join(fig_dir, path),
                                  duration=duration, rec_to_pred_t=cond_steps)
+
+    return path

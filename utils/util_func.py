@@ -20,6 +20,8 @@ import torchvision.transforms as transforms
 import torchvision.ops as ops
 from typing import Tuple
 
+import wandb
+
 
 def color_map(num=100):
     colormap = ["FF355E",
@@ -527,6 +529,14 @@ def save_config(src_dir, hparams):
 def get_config(fpath):
     with open(fpath, 'r') as f:
         config = json.load(f)
+
+    wandb_project = 'wandb_project'
+    wandb_group = 'wandb_group'
+    wandb_run_name = 'wandb_run_name'
+    config[wandb_project] = config.get(wandb_project, 'Test project')
+    config[wandb_group] = config.get(wandb_group, 'Test group')
+    config[wandb_run_name] = config.get(wandb_run_name, 'Test run')
+
     return config
 
 
@@ -849,6 +859,18 @@ def calc_model_size(model):
         buffer_size += buffer.nelement() * buffer.element_size()
     size_all_mb = (param_size + buffer_size) / 1024 ** 2
     return {'n_params': num_trainable_params, 'size_mb': size_all_mb}
+
+
+def save(model, optimizer, scheduler, epoch, path):
+    torch.save({'model_state_dict': model.state_dict(), 'optimizer_state_dict': optimizer.state_dict(),
+                'scheduler_state_dict': scheduler.state_dict(), 'epoch': epoch}, path)
+
+
+def wandb_log(config, logdir, *args, **kwargs):
+    if wandb.run is None:
+        wandb.init(project=config.wandb_project, group=config.wandb_group, name=config.wandb_run_name, dir=logdir)
+
+    wandb.log(*args, **kwargs)
 
 
 """

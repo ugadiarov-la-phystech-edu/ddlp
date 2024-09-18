@@ -5,6 +5,7 @@ Single-GPU training of DDLP
 import numpy as np
 import os
 import matplotlib.pyplot as plt
+import wandb
 from tqdm import tqdm
 import matplotlib
 import argparse
@@ -21,18 +22,13 @@ from models import ObjectDynamicsDLP
 from datasets.get_dataset import get_video_dataset
 # util functions
 from utils.util_func import plot_keypoints_on_image_batch, prepare_logdir, save_config, log_line, \
-    plot_bb_on_image_batch_from_z_scale_nms, plot_bb_on_image_batch_from_masks_nms, get_config
+    plot_bb_on_image_batch_from_z_scale_nms, plot_bb_on_image_batch_from_masks_nms, get_config, save, wandb_log
 from eval.eval_model import evaluate_validation_elbo_dyn, animate_trajectory_ddlp
 from eval.eval_gen_metrics import eval_ddlp_im_metric
 
 matplotlib.use("Agg")
 torch.backends.cudnn.benchmark = False
 torch.backends.cudnn.deterministic = True
-
-
-def save(model, optimizer, scheduler, epoch, path):
-    torch.save({'model_state_dict': model.state_dict(), 'optimizer_state_dict': optimizer.state_dict(),
-                'scheduler_state_dict': scheduler.state_dict(), 'epoch': epoch}, path)
 
 
 def train_ddlp(config_path='./configs/balls.json'):
@@ -306,6 +302,14 @@ def train_ddlp(config_path='./configs/balls.json'):
         # scheduler
         scheduler.step()
 
+        log_data = {'epoch': epoch, 'loss': losses[-1], 'rec': losses_rec[-1], 'kl': losses_kl[-1],
+                          'kl_balance': kl_balance, 'kl_kp': losses_kl_kp[-1], 'kl_feat': losses_kl_feat[-1],
+                          'kl_scale': losses_kl_scale[-1], 'kl_depth': losses_kl_depth[-1],
+                          'kl_obj_on': losses_kl_obj_on,
+                          'kl_dyn': losses_kl_dyn[-1], 'mu max': mu_tot.max(), 'mu min': mu_tot.min(),
+                          'mu offset max': mu_offset.max(), 'mu offset min': mu_offset.min(),}
+        log_data = {f'train/{key}': value for key, value in log_data.items()}
+
         # epoch summary
         log_str = f'epoch {epoch} summary\n'
         log_str += f'loss: {losses[-1]:.3f}, rec: {losses_rec[-1]:.3f}, kl: {losses_kl[-1]:.3f}\n'
@@ -359,6 +363,9 @@ def train_ddlp(config_path='./configs/balls.json'):
                                                                                 iou_thresh=iou_thresh, thickness=1,
                                                                                 max_imgs=max_imgs,
                                                                                 hard_thresh=hard_threshold)
+
+            valid_log_data = {'bb scores max': bb_scores.max(), 'bb scores min': bb_scores.min(),
+                              'bb scores mean': bb_scores.mean()}
             # hard_thresh: a general threshold for bb scores (set None to not use it)
             bb_str = f'bb scores: max: {bb_scores.max():.2f}, min: {bb_scores.min():.2f},' \
                      f' mean: {bb_scores.mean():.2f}\n'
@@ -369,15 +376,16 @@ def train_ddlp(config_path='./configs/balls.json'):
                                                              kp_range=kp_range)
             dec_objects = model_output['dec_objects']
             bg = model_output['bg']
+            image_path = '{}/image_{}.jpg'.format(fig_dir, epoch)
             vutils.save_image(torch.cat([x[:max_imgs, -3:], img_with_kp[:max_imgs, -3:].to(device),
                                          rec_x[:max_imgs, -3:], img_with_kp_p[:max_imgs, -3:].to(device),
                                          img_with_kp_topk[:max_imgs, -3:].to(device),
                                          dec_objects[:max_imgs, -3:],
                                          img_with_masks_nms[:max_imgs, -3:].to(device),
                                          img_with_masks_alpha_nms[:max_imgs, -3:].to(device),
-                                         bg[:max_imgs, -3:]],
-                                        dim=0).data.cpu(), '{}/image_{}.jpg'.format(fig_dir, epoch),
-                              nrow=8, pad_value=1)
+                                         bg[:max_imgs, -3:]], dim=0).data.cpu(),
+                              image_path, nrow=8, pad_value=1)
+            valid_log_data['vis'] = wandb.Image(image_path)
             with torch.no_grad():
                 _, dec_objects_rgb = torch.split(dec_objects_original, [1, 3], dim=2)
                 dec_objects_rgb = dec_objects_rgb.reshape(-1, *dec_objects_rgb.shape[2:])
@@ -390,15 +398,18 @@ def train_ddlp(config_path='./configs/balls.json'):
                     cropped_objects_original = F.interpolate(cropped_objects_original,
                                                              size=dec_objects_rgb.shape[-1],
                                                              align_corners=False, mode='bilinear')
+            image_obj_path = '{}/image_obj_{}.jpg'.format(fig_dir, epoch)
             vutils.save_image(
                 torch.cat([cropped_objects_original[:max_imgs * 2, -3:], dec_objects_rgb[:max_imgs * 2, -3:]],
-                          dim=0).data.cpu(), '{}/image_obj_{}.jpg'.format(fig_dir, epoch),
-                nrow=8, pad_value=1)
+                          dim=0).data.cpu(), image_obj_path, nrow=8, pad_value=1)
+            valid_log_data['vis_obj'] = wandb.Image(image_obj_path)
 
             save(model, optimizer, scheduler, epoch, os.path.join(save_dir, f'{ds}_ddlp{run_prefix}.pth'))
-            animate_trajectory_ddlp(model, config, epoch, device=device, fig_dir=fig_dir,
-                                    timestep_horizon=animation_horizon,
-                                    num_trajetories=1, train=True, cond_steps=cond_steps)
+            animation_path = animate_trajectory_ddlp(model, config, epoch, device=device, fig_dir=fig_dir,
+                                                     timestep_horizon=animation_horizon,
+                                                     num_trajetories=1, train=True, cond_steps=cond_steps)
+            valid_log_data['video'] = wandb.Video(animation_path)
+
             print("validation step...")
             valid_loss = evaluate_validation_elbo_dyn(model, config, epoch, batch_size=batch_size,
                                                       recon_loss_type=recon_loss_type, device=device,
@@ -417,12 +428,16 @@ def train_ddlp(config_path='./configs/balls.json'):
                 best_valid_loss = valid_loss
                 best_valid_epoch = epoch
                 save(model, optimizer, scheduler, epoch, os.path.join(save_dir, f'{ds}_ddlp{run_prefix}_best.pth'))
+
+            valid_log_data.update(
+                {'loss': valid_loss, 'best loss': best_valid_loss, 'best loss epoch': best_valid_epoch})
             torch.cuda.empty_cache()
             if eval_im_metrics and epoch > 0:
                 valid_imm_results = eval_ddlp_im_metric(model, device, config,
                                                         timestep_horizon=animation_horizon, val_mode='val',
                                                         eval_dir=log_dir,
                                                         cond_steps=cond_steps, batch_size=batch_size)
+
                 log_str = f'validation: lpips: {valid_imm_results["lpips"]:.3f}, '
                 log_str += f'psnr: {valid_imm_results["psnr"]:.3f}, ssim: {valid_imm_results["ssim"]:.3f}\n'
                 val_lpips = valid_imm_results['lpips']
@@ -434,8 +449,16 @@ def train_ddlp(config_path='./configs/balls.json'):
                     log_line(log_dir, log_str)
                     best_val_lpips = val_lpips
                     best_val_lpips_epoch = epoch
-                    save(model, optimizer, scheduler, epoch, os.path.join(save_dir, f'{ds}_ddlp{run_prefix}_best_lpips.pth'))
+                    save(model, optimizer, scheduler, epoch,
+                         os.path.join(save_dir, f'{ds}_ddlp{run_prefix}_best_lpips.pth'))
+
+                valid_log_data.update(
+                    {key: value for key, value in valid_imm_results.items() if key in ('lpips', 'psnr', 'ssim')})
+                valid_log_data.update({'best lpips': best_val_lpips, 'best lpips epoch': best_val_lpips_epoch})
                 torch.cuda.empty_cache()
+            log_data.update({f'val/{key}': value for key, value in valid_log_data.items()})
+
+        wandb_log(config, log_dir, log_data)
         valid_losses.append(valid_loss)
         if eval_im_metrics:
             val_lpipss.append(val_lpips)
