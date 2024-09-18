@@ -69,6 +69,7 @@
   "cond_steps": 10,
   "animation_fps": 0.06,
   "use_correlation_heatmaps": true,
+  "use_tracking": true,
   "enable_enc_attn": false,
   "filtering_heuristic": "variance"
 }
