@@ -533,9 +533,11 @@ def get_config(fpath):
     wandb_project = 'wandb_project'
     wandb_group = 'wandb_group'
     wandb_run_name = 'wandb_run_name'
+    wandb_run_id = 'wandb_run_id'
     config[wandb_project] = config.get(wandb_project, 'Test project')
     config[wandb_group] = config.get(wandb_group, 'Test group')
     config[wandb_run_name] = config.get(wandb_run_name, 'Test run')
+    config[wandb_run_id] = config.get(wandb_run_id)
 
     return config
 
@@ -868,7 +870,9 @@ def save(model, optimizer, scheduler, epoch, path):
 
 def wandb_log(config, logdir, *args, **kwargs):
     if wandb.run is None:
-        wandb.init(project=config['wandb_project'], group=config['wandb_group'], name=config['wandb_run_name'], dir=logdir)
+        resume = 'never' if config['wandb_run_id'] is None else 'must'
+        wandb.init(project=config['wandb_project'], group=config['wandb_group'], name=config['wandb_run_name'],
+                   id=config['wandb_run_id'], resume=resume, dir=logdir)
 
     wandb.log(*args, **kwargs)
 
