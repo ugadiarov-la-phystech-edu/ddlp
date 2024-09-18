@@ -30,6 +30,11 @@ torch.backends.cudnn.benchmark = False
 torch.backends.cudnn.deterministic = True
 
 
+def save(model, optimizer, scheduler, epoch, path):
+    torch.save({'model_state_dict': model.state_dict(), 'optimizer_state_dict': optimizer.state_dict(),
+                'scheduler_state_dict': scheduler.state_dict(), 'epoch': epoch}, path)
+
+
 def train_ddlp(config_path='./configs/balls.json'):
     # load config
     try:
@@ -390,7 +395,7 @@ def train_ddlp(config_path='./configs/balls.json'):
                           dim=0).data.cpu(), '{}/image_obj_{}.jpg'.format(fig_dir, epoch),
                 nrow=8, pad_value=1)
 
-            torch.save(model.state_dict(), os.path.join(save_dir, f'{ds}_ddlp{run_prefix}.pth'))
+            save(model, optimizer, scheduler, epoch, os.path.join(save_dir, f'{ds}_ddlp{run_prefix}.pth'))
             animate_trajectory_ddlp(model, config, epoch, device=device, fig_dir=fig_dir,
                                     timestep_horizon=animation_horizon,
                                     num_trajetories=1, train=True, cond_steps=cond_steps)
@@ -411,9 +416,7 @@ def train_ddlp(config_path='./configs/balls.json'):
                 log_line(log_dir, log_str)
                 best_valid_loss = valid_loss
                 best_valid_epoch = epoch
-                torch.save(model.state_dict(),
-                           os.path.join(save_dir,
-                                        f'{ds}_ddlp{run_prefix}_best.pth'))
+                save(model, optimizer, scheduler, epoch, os.path.join(save_dir, f'{ds}_ddlp{run_prefix}_best.pth'))
             torch.cuda.empty_cache()
             if eval_im_metrics and epoch > 0:
                 valid_imm_results = eval_ddlp_im_metric(model, device, config,
@@ -431,8 +434,7 @@ def train_ddlp(config_path='./configs/balls.json'):
                     log_line(log_dir, log_str)
                     best_val_lpips = val_lpips
                     best_val_lpips_epoch = epoch
-                    torch.save(model.state_dict(),
-                               os.path.join(save_dir, f'{ds}_ddlp{run_prefix}_best_lpips.pth'))
+                    save(model, optimizer, scheduler, epoch, os.path.join(save_dir, f'{ds}_ddlp{run_prefix}_best_lpips.pth'))
                 torch.cuda.empty_cache()
         valid_losses.append(valid_loss)
         if eval_im_metrics:
