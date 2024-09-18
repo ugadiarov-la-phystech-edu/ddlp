@@ -77,7 +77,7 @@ def evaluate_validation_elbo(model, config, epoch, batch_size=100, recon_loss_ty
         elbo = loss
         elbos.append(elbo.data.cpu().numpy())
 
-    result = {'valid_elbos': np.mean(elbos)}
+    result = {'elbos': np.mean(elbos)}
     if save_image:
         max_imgs = 8
         mu_plot = mu_tot.clamp(min=kp_range[0], max=kp_range[1])
@@ -174,10 +174,10 @@ def evaluate_validation_elbo(model, config, epoch, batch_size=100, recon_loss_ty
                 torch.cat([cropped_objects_original[:max_imgs * 2, -3:], dec_objects_rgb[:max_imgs * 2, -3:]],
                           dim=0).data.cpu(), image_obj_path, nrow=8, pad_value=1)
         if image_path is not None:
-            result['valid_image_path'] = image_path
+            result['image_path'] = image_path
 
         if image_obj_path is not None:
-            result['valid_image_obj_path'] = image_obj_path
+            result['image_obj_path'] = image_obj_path
 
     return np.mean(elbos)
 
