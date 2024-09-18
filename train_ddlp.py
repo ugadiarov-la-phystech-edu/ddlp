@@ -147,10 +147,15 @@ def train_ddlp(config_path='./configs/balls.json'):
     optimizer = optim.Adam(model.get_parameters(), lr=lr, betas=adam_betas, eps=adam_eps, weight_decay=weight_decay)
     scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=scheduler_gamma, verbose=True)
 
+    pretrained_epoch = 0
     if load_model and pretrained_path is not None:
         try:
-            model.load_state_dict(torch.load(pretrained_path, map_location=device))
-            print("loaded model from checkpoint")
+            checkpoint = torch.load(pretrained_path, map_location=device)
+            model.load_state_dict(checkpoint['model_state_dict'])
+            optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+            scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+            pretrained_epoch = checkpoint['epoch']
+            print(f"loaded model from checkpoint: {pretrained_path}")
         except:
             print("model checkpoint not found")
 
@@ -186,7 +191,7 @@ def train_ddlp(config_path='./configs/balls.json'):
     max_iterations_per_step = [iter_per_step * (i + 1) for i in range(timestep_horizon)]
     iteration = 0  # initialize iterations counter
 
-    for epoch in range(num_epochs):
+    for epoch in range(pretrained_epoch, num_epochs):
         model.train()
         batch_losses = []
         batch_losses_rec = []
