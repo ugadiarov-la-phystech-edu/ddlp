@@ -53,8 +53,8 @@ class EpisodesDataset(Dataset):
 
     def __getitem__(self, index):
         imgs = []
-        ep = self.index2episode[index]
         if self.mode == 'train' or not self.episodic:
+            ep = self.index2episode[index]
             # Implement continuous indexing
             offset = self.episode2offset[ep]
             begin = index - offset
@@ -65,6 +65,7 @@ class EpisodesDataset(Dataset):
                 img = transforms.ToTensor()(img)[:3]
                 imgs.append(img)
         else:
+            ep = index
             for path in self.episode_images[ep]:
                 img = Image.open(path)
                 img = img.resize((self.res, self.res))
@@ -129,11 +130,17 @@ class EpisodesDatasetImage(Dataset):
 
     def __getitem__(self, index):
         imgs = []
-        ep = self.index2episode[index]
         # Implement continuous indexing
-        offset = self.episode2offset[ep]
-        begin = index - offset
-        end = begin + self.sample_length
+        if self.episodic:
+            ep = index
+            begin = 0
+            end = len(self.episode_images[ep])
+        else:
+            ep = self.index2episode[index]
+            offset = self.episode2offset[ep]
+            begin = index - offset
+            end = begin + self.sample_length
+
         for image_index in range(begin, end):
             img = Image.open(self.episode_images[ep][image_index])
             img = img.resize((self.res, self.res))
@@ -149,6 +156,9 @@ class EpisodesDatasetImage(Dataset):
         return img, pos, size, id, in_camera
 
     def __len__(self):
+        if self.episodic:
+            return len(self.episode_images)
+
         return len(self.index2episode)
 
 
