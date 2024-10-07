@@ -8,6 +8,8 @@ import os
 import numpy as np
 import torch
 
+from datasets.dataset_element import DatasetItem
+
 
 class Balls(Dataset):
     def __init__(self, root, mode, ep_len=100, sample_length=20):
@@ -62,7 +64,7 @@ class Balls(Dataset):
         img = torch.from_numpy(img).permute(0, 3, 1, 2)
         img = img.float() / 255.0
 
-        return img, pos, size, id, in_camera
+        return DatasetItem(img=img, pos=pos, size=size, id=id, in_camera=in_camera)
 
     def __len__(self):
         with h5py.File(self.file, 'r') as f:
@@ -118,7 +120,7 @@ class BallsImage(Dataset):
         img = torch.from_numpy(img).permute(0, 3, 1, 2)
         img = img.float() / 255.0
 
-        return img, pos, size, id, in_camera
+        return DatasetItem(img=img, pos=pos, size=size, id=id, in_camera=in_camera)
 
     def __len__(self):
         with h5py.File(self.file, 'r') as f:

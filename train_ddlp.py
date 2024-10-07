@@ -207,6 +207,7 @@ def train_ddlp(config_path='./configs/balls.json'):
         pbar = tqdm(iterable=dataloader)
         for batch in pbar:
             x = batch[0].to(device)
+            action = batch[-1].to(device)
             x_prior = x  # the input image to the prior is the same as the posterior
             noisy = (epoch < (warmup_epoch + 1))
             forward_dyn = (epoch >= start_epoch)  # forward through the dynamics module

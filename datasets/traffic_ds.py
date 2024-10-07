@@ -10,6 +10,8 @@ import torchvision.transforms as transforms
 from PIL import Image
 from tqdm import tqdm
 
+from datasets.dataset_item import DatasetItem
+
 
 def list_images_in_dir(path):
     valid_images = [".jpg", ".gif", ".png"]
@@ -105,7 +107,8 @@ class TrafficDataset(Dataset):
         size = torch.zeros(0)
         id = torch.zeros(0)
         in_camera = torch.zeros(0)
-        return images, pos, size, id, in_camera
+
+        return DatasetItem(img=images, pos=pos, size=size, id=id, in_camera=in_camera)
 
     def __len__(self):
         if self.mode == 'train':
@@ -162,7 +165,8 @@ class TrafficDatasetImage(Dataset):
         size = torch.zeros(0)
         id = torch.zeros(0)
         in_camera = torch.zeros(0)
-        return images, pos, size, id, in_camera
+
+        return DatasetItem(img=images, pos=pos, size=size, id=id, in_camera=in_camera)
 
     def __len__(self):
         return self.data.shape[0]

@@ -1,5 +1,5 @@
 # datasets
-from datasets.episodes_dataset import EpisodesDataset, EpisodesDatasetImage
+from datasets.episodes_dataset import EpisodesDataset
 from datasets.traffic_ds import TrafficDataset, TrafficDatasetImage
 from datasets.clevrer_ds import CLEVREREpDataset, CLEVREREpDatasetImage
 from datasets.shapes_ds import generate_shape_dataset_torch
@@ -26,7 +26,8 @@ def get_video_dataset(ds, root, seq_len=1, mode='train', image_size=128, **kwarg
     elif ds == 'langtable':
         dataset = LanguageTableDataset(root=root, mode=mode, sample_length=seq_len, image_size=image_size)
     elif ds == 'episodes_dataset':
-        dataset = EpisodesDataset(root=root, mode=mode, sample_length=seq_len, res=image_size, **kwargs)
+        dataset = EpisodesDataset(root=root, mode=mode, sample_length=seq_len, res=image_size, episodic_on_train=False,
+                                  episodic_on_val=True, **kwargs)
     else:
         raise NotImplementedError
     return dataset
@@ -56,7 +57,8 @@ def get_image_dataset(ds, root, mode='train', image_size=128, seq_len=1, **kwarg
     elif ds == 'langtable':
         dataset = LanguageTableDatasetImage(root=root, mode=mode, sample_length=seq_len, image_size=image_size)
     elif ds == 'episodes_dataset':
-        dataset = EpisodesDatasetImage(root=root, mode=mode, sample_length=seq_len, res=image_size, **kwargs)
+        dataset = EpisodesDataset(root=root, mode=mode, sample_length=seq_len, res=image_size, episodic_on_train=False,
+                                  episodic_on_val=False, **kwargs)
     else:
         raise NotImplementedError
     return dataset

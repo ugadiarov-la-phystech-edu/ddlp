@@ -6,6 +6,8 @@ import torchvision.transforms as transforms
 import glob
 from PIL import Image, ImageFile
 
+from datasets.dataset_item import DatasetItem
+
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 
@@ -122,7 +124,7 @@ class PhyreDataset(Dataset):
         id = torch.zeros(0)
         in_camera = torch.zeros(0)
 
-        return img, pos, size, id, in_camera
+        return DatasetItem(img=img, pos=pos, size=size, id=id, in_camera=in_camera)
 
     def __len__(self):
         length = len(self.episodes)
@@ -227,7 +229,7 @@ class PhyreDatasetImage(Dataset):
         id = torch.zeros(0)
         in_camera = torch.zeros(0)
 
-        return img, pos, size, id, in_camera
+        return DatasetItem(img=img, pos=pos, size=size, id=id, in_camera=in_camera)
 
     def __len__(self):
         length = len(self.episodes)
