@@ -1654,7 +1654,7 @@ class ObjectDynamicsDLP(nn.Module):
                  kp_range=(-1, 1), kp_activation="tanh", anchor_s=0.25, predict_delta=True,
                  timestep_horizon=10, enable_enc_attn=False, use_correlation_heatmaps=True,
                  use_resblock=False, scale_std=0.3, offset_std=0.2, obj_on_alpha=0.1, obj_on_beta=0.1, pint_layers=6,
-                 pint_heads=8, pint_dim=256, filtering_heuristic='variance'):
+                 pint_heads=8, pint_dim=256, filtering_heuristic='variance', action_dim=None):
         super(ObjectDynamicsDLP, self).__init__()
         """
         cdim: channels of the input image (3...)
@@ -1713,6 +1713,7 @@ class ObjectDynamicsDLP(nn.Module):
         assert filtering_heuristic in ['distance', 'variance',
                                        'random', 'none'], f'unknown filtering heuristic: {filtering_heuristic}'
         self.filtering_heuristic = filtering_heuristic
+        self.action_dim = action_dim
 
         # priors
         self.register_buffer('logvar_kp', torch.log(torch.tensor(sigma ** 2)))
@@ -1743,7 +1744,7 @@ class ObjectDynamicsDLP(nn.Module):
                                       projection_dim=pint_inner_dim,
                                       n_head=self.pint_heads, n_layer=self.pint_layers, block_size=timestep_horizon,
                                       kp_activation=kp_activation, predict_delta=self.predict_delta, max_delta=1.0,
-                                      positional_bias=True, max_particles=max_particles)
+                                      positional_bias=True, max_particles=max_particles, action_dim=self.action_dim)
         self.init_weights()
 
     def get_parameters(self, prior=True, encoder=True, decoder=True, dynamics=True):
@@ -1987,7 +1988,8 @@ class ObjectDynamicsDLP(nn.Module):
 
         return decoder_out
 
-    def sample(self, x, num_steps=10, deterministic=True, bg_masks_from_fg=False, cond_steps=None, return_z=False):
+    def sample(self, x, action=None, num_steps=10, deterministic=True, bg_masks_from_fg=False, cond_steps=None,
+               return_z=False, teacher_forcing=False):
         """
         (Conditioanl) Sampling from DDLP: x is the conditional frames, encoded to latent particles
          which are unrolled to the future with PINT, and the predicted particles are then decoded to a sequence
@@ -1997,12 +1999,31 @@ class ObjectDynamicsDLP(nn.Module):
         # encode-decode
         batch_size, timestep_horizon_all = x.size(0), x.size(1)
         timestep_horizon = self.timestep_horizon if cond_steps is None else cond_steps
+        xs = [x[:, :timestep_horizon]]
+        actions = action
+        if teacher_forcing:
+            for i in range(1, x.shape[1] - timestep_horizon + 1):
+                xs.append(x[:, i: i + timestep_horizon])
+
+            if action is not None:
+                actions = []
+                for i in range(x.shape[1] - timestep_horizon + 1):
+                    actions.append(action[:, i: i + timestep_horizon])
+
+                actions = torch.stack(actions, dim=1)
+
+        xs = torch.stack(xs, dim=1)
+        assert not teacher_forcing or xs.shape[1] == num_steps
+        batch_size_all = batch_size * num_steps if teacher_forcing else batch_size
+        xs = xs.reshape(batch_size_all, timestep_horizon, *x.shape[-3:])
+        if actions is not None:
+            actions = actions.reshape(batch_size_all, timestep_horizon, -1)
 
         # sequential
-        fg_dict = self.fg_sequential_opt(x[:, :timestep_horizon], deterministic=deterministic,
-                                         x_prior=x[:, :timestep_horizon], reshape=True)
+        fg_dict = self.fg_sequential_opt(xs[:, :timestep_horizon], deterministic=deterministic,
+                                         x_prior=xs[:, :timestep_horizon], reshape=True)
 
-        x_in = x[:, :timestep_horizon].reshape(-1, *x.shape[2:])  # [bs * T, ...]
+        x_in = xs.reshape(-1, *x.shape[2:])  # [batch_size_all * timestep_horizon, ...]
         # encoder
         z = fg_dict['z']
         z_features = fg_dict['z_features']
@@ -2024,18 +2045,19 @@ class ObjectDynamicsDLP(nn.Module):
 
         # stitch
         rec = bg_mask * bg + dec_objects_trans
-        rec = rec.view(batch_size, -1, *rec.shape[1:])
+        rec = rec.view(batch_size_all, timestep_horizon, *rec.shape[1:])
 
-        z_v = z.view(batch_size, timestep_horizon, *z.shape[1:])
-        z_scale_v = z_scale.view(batch_size, timestep_horizon, *z_scale.shape[1:])
-        z_obj_on_v = z_obj_on.view(batch_size, timestep_horizon, *z_obj_on.shape[1:])
-        z_depth_v = z_depth.view(batch_size, timestep_horizon, *z_depth.shape[1:])
-        z_features_v = z_features.view(batch_size, timestep_horizon, *z_features.shape[1:])
-        z_bg_features_v = z_bg.view(batch_size, timestep_horizon, *z_bg.shape[1:])
+        z_v = z.view(batch_size_all, timestep_horizon, *z.shape[1:])
+        z_scale_v = z_scale.view(batch_size_all, timestep_horizon, *z_scale.shape[1:])
+        z_obj_on_v = z_obj_on.view(batch_size_all, timestep_horizon, *z_obj_on.shape[1:])
+        z_depth_v = z_depth.view(batch_size_all, timestep_horizon, *z_depth.shape[1:])
+        z_features_v = z_features.view(batch_size_all, timestep_horizon, *z_features.shape[1:])
+        z_bg_features_v = z_bg.view(batch_size_all, timestep_horizon, *z_bg.shape[1:])
 
         # dynamics
+        steps = 1 if teacher_forcing else num_steps
         dyn_out = self.dyn_module.sample(z_v, z_scale_v, z_obj_on_v, z_depth_v, z_features_v, z_bg_features_v,
-                                         steps=num_steps, deterministic=deterministic)
+                                         steps=steps, deterministic=deterministic, action=actions)
         z_dyn, z_scale_dyn, z_obj_on_dyn, z_depth_dyn, z_features_dyn, z_bg_features_dyn = dyn_out
         if return_z:
             z_ids = 1 + torch.arange(z_dyn.shape[2], device=z_dyn.device)  # num_particles, ids start from 1
@@ -2044,18 +2066,28 @@ class ObjectDynamicsDLP(nn.Module):
                      'z_depth': z_depth_dyn.detach(), 'z_features': z_features_dyn.detach(),
                      'z_bg_features': z_bg_features_dyn.detach(), 'z_ids': z_ids}
         # decode
-        z_dyn = z_dyn[:, -num_steps:].reshape(-1, *z_dyn.shape[2:])
-        z_features_dyn = z_features_dyn[:, -num_steps:].reshape(-1, *z_features_dyn.shape[2:])
-        z_bg_features_dyn = z_bg_features_dyn[:, -num_steps:].reshape(-1, *z_bg_features_dyn.shape[2:])
-        z_obj_on_dyn = z_obj_on_dyn[:, -num_steps:].reshape(-1, *z_obj_on_dyn.shape[2:])
-        z_depth_dyn = z_depth_dyn[:, -num_steps:].reshape(-1, *z_depth_dyn.shape[2:])
-        z_scale_dyn = z_scale_dyn[:, -num_steps:].reshape(-1, *z_scale_dyn.shape[2:])
+        z_dyn = z_dyn[:, -steps:].reshape(-1, *z_dyn.shape[2:])
+        z_features_dyn = z_features_dyn[:, -steps:].reshape(-1, *z_features_dyn.shape[2:])
+        z_bg_features_dyn = z_bg_features_dyn[:, -steps:].reshape(-1, *z_bg_features_dyn.shape[2:])
+        z_obj_on_dyn = z_obj_on_dyn[:, -steps:].reshape(-1, *z_obj_on_dyn.shape[2:])
+        z_depth_dyn = z_depth_dyn[:, -steps:].reshape(-1, *z_depth_dyn.shape[2:])
+        z_scale_dyn = z_scale_dyn[:, -steps:].reshape(-1, *z_scale_dyn.shape[2:])
         dec_out = self.decode_all(z_dyn, z_features_dyn, z_bg_features_dyn, z_obj_on_dyn,
                                   z_depth=z_depth_dyn, z_scale=z_scale_dyn)
         rec_dyn = dec_out['rec']
-        rec_dyn = rec_dyn.reshape(batch_size, -1, *rec_dyn.shape[1:])
-        rec = torch.cat([rec, rec_dyn], dim=1)
-        assert timestep_horizon_all == rec.shape[1], "prediction and gt frames shape don't match"
+        rec_dyn = rec_dyn.reshape(batch_size_all, -1, *rec_dyn.shape[1:])
+        rec_dyn = rec_dyn.reshape(batch_size, num_steps, *rec_dyn.shape[2:])
+        if teacher_forcing:
+            rec = rec.reshape(batch_size, num_steps, *rec.shape[1:])
+            rec = torch.cat(
+                [rec[:, 0], rec[:, 1:, -1].reshape(rec.shape[0], -1, *rec.shape[3:])],
+                dim=1)
+            rec = torch.cat([rec[:, :rec.shape[1] - rec_dyn.shape[1] + 1], rec_dyn], dim=1)
+            assert timestep_horizon_all + 1 == rec.shape[1], "prediction and gt frames shape don't match"
+        else:
+            rec = torch.cat([rec, rec_dyn], dim=1)
+            assert timestep_horizon_all == rec.shape[1], "prediction and gt frames shape don't match"
+
         if return_z:
             return rec, z_out
         return rec
@@ -2434,7 +2466,8 @@ class ObjectDynamicsDLP(nn.Module):
                        'logvar_scale': logvar_scales, 'z_scale': z_scales, 'alpha_masks': alpha_maskss}
         return output_dict
 
-    def forward(self, x, deterministic=False, bg_masks_from_fg=False, x_prior=None, warmup=False, noisy=False,
+    def forward(self, x, action=None, deterministic=False, bg_masks_from_fg=False, x_prior=None, warmup=False,
+                noisy=False,
                 forward_dyn=True, train_enc_prior=True, num_static_frames=4):
         # x: [bs, T + 1, ...]
         batch_size, timestep_horizon = x.size(0), x.size(1)
@@ -2507,7 +2540,7 @@ class ObjectDynamicsDLP(nn.Module):
             z_bg_features_v = z_bg.view(batch_size, timestep_horizon, *z_bg.shape[1:])[:, :-1]
             # [bs, T-1, bg_learned_feature_dim]
 
-            dyn_out = self.dyn_module(z_v, z_scale_v, z_obj_on_v, z_depth_v, z_features_v, z_bg_features_v)
+            dyn_out = self.dyn_module(z_v, z_scale_v, z_obj_on_v, z_depth_v, z_features_v, z_bg_features_v, action)
             mu_dyn = dyn_out['mu']
             logvar_dyn = dyn_out['logvar']
 

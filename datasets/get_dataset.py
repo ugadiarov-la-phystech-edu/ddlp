@@ -26,8 +26,9 @@ def get_video_dataset(ds, root, seq_len=1, mode='train', image_size=128, **kwarg
     elif ds == 'langtable':
         dataset = LanguageTableDataset(root=root, mode=mode, sample_length=seq_len, image_size=image_size)
     elif ds == 'episodes_dataset':
-        dataset = EpisodesDataset(root=root, mode=mode, sample_length=seq_len, res=image_size, episodic_on_train=False,
-                                  episodic_on_val=True, **kwargs)
+        kwargs['episodic_on_train'] = kwargs.get('episodic_on_train', False)
+        kwargs['episodic_on_val'] = kwargs.get('episodic_on_val', True)
+        dataset = EpisodesDataset(root=root, mode=mode, sample_length=seq_len, res=image_size, **kwargs)
     else:
         raise NotImplementedError
     return dataset
@@ -57,8 +58,9 @@ def get_image_dataset(ds, root, mode='train', image_size=128, seq_len=1, **kwarg
     elif ds == 'langtable':
         dataset = LanguageTableDatasetImage(root=root, mode=mode, sample_length=seq_len, image_size=image_size)
     elif ds == 'episodes_dataset':
-        dataset = EpisodesDataset(root=root, mode=mode, sample_length=seq_len, res=image_size, episodic_on_train=False,
-                                  episodic_on_val=False, **kwargs)
+        kwargs['episodic_on_train'] = kwargs.get('episodic_on_train', False)
+        kwargs['episodic_on_val'] = kwargs.get('episodic_on_val', False)
+        dataset = EpisodesDataset(root=root, mode=mode, sample_length=seq_len, res=image_size, **kwargs)
     else:
         raise NotImplementedError
     return dataset

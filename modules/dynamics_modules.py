@@ -253,7 +253,7 @@ class ParticleTransformer(nn.Module):
 
 
 class ParticleFeatureProjection(torch.nn.Module):
-    def __init__(self, in_features_dim, bg_features_dim, hidden_dim, output_dim):
+    def __init__(self, in_features_dim, bg_features_dim, hidden_dim, output_dim, action_dim=None):
         super().__init__()
         # a projection module to match PINT's inner dimension
         # particles: [z, z_scale, z_obj_on, z_depth, z_features]
@@ -264,6 +264,14 @@ class ParticleFeatureProjection(torch.nn.Module):
         self.output_dim = output_dim
         self.particle_dim = 2 + 2 + 1 + 1 + in_features_dim
         # [z, z_scale, z_obj_on, z_depth, z_features]
+
+        self.action_dim = action_dim
+        if self.action_dim is not None:
+            self.particle_dim += self.action_dim
+            self.bg_features_dim += self.action_dim
+            self.action_projection = nn.Sequential(nn.Linear(self.action_dim, hidden_dim),
+                                                   nn.ReLU(True),
+                                                   nn.Linear(hidden_dim, self.action_dim))
 
         self.xy_projection = nn.Sequential(nn.Linear(2, hidden_dim),
                                            nn.ReLU(True),
@@ -283,7 +291,7 @@ class ParticleFeatureProjection(torch.nn.Module):
         self.particle_projection = nn.Sequential(nn.Linear(self.particle_dim, hidden_dim),
                                                  nn.ReLU(True),
                                                  nn.Linear(hidden_dim, output_dim))
-        self.bg_features_projection = nn.Sequential(nn.Linear(bg_features_dim, hidden_dim),
+        self.bg_features_projection = nn.Sequential(nn.Linear(self.bg_features_dim, hidden_dim),
                                                     nn.ReLU(True),
                                                     nn.Linear(hidden_dim, output_dim))
 
@@ -292,7 +300,7 @@ class ParticleFeatureProjection(torch.nn.Module):
     def init_weights(self):
         pass
 
-    def forward(self, z, z_scale, z_obj_on, z_depth, z_features, z_bg_features):
+    def forward(self, z, z_scale, z_obj_on, z_depth, z_features, z_bg_features, action=None):
         # z, z_scale, z_velocity: [bs, n_particles, 2]
         # z_depth, z_obj_on: [bs, n_particles, 1]
         # z_features: [bs, n_particles, in_features_dim]
@@ -305,9 +313,17 @@ class ParticleFeatureProjection(torch.nn.Module):
         z_obj_on_proj = self.obj_on_projection(z_obj_on)
         z_depth_proj = self.depth_projection(z_depth)
         z_features_proj = self.features_projection(z_features)
-        z_all = torch.cat([z_proj, z_scale_proj, z_obj_on_proj, z_depth_proj, z_features_proj], dim=-1)
-        # z_all: [bs, n_particles, 2 + 2 + 1 + 1 + in_features_dim]
+        z_all = [z_proj, z_scale_proj, z_obj_on_proj, z_depth_proj, z_features_proj]
+        z_bg_features = [z_bg_features]
+        if action is not None:
+            action_proj = self.action_projection(action)
+            z_bg_features.append(action_proj)
+            z_all.append(action_proj.unsqueeze(1).expand(-1, n_particles, -1))
+
+        z_all = torch.cat(z_all, dim=-1)
+        # z_all: [bs, n_particles, 2 + 2 + 1 + 1 + in_features_dim + action_dim]
         z_all_proj = self.particle_projection(z_all)  # [bs, n_particles, output_dim]  or [bs, n_particle, hidden_dim]
+        z_bg_features = torch.cat(z_bg_features, dim=-1)
         z_bg_features_proj = self.bg_features_projection(z_bg_features)  # [bs, output_dim] or [bs, hidden_dim]
         # concat
         z_processed = torch.cat([z_all_proj, z_bg_features_proj.unsqueeze(1)], dim=1)
@@ -400,7 +416,7 @@ class DynamicsDLP(nn.Module):
     def __init__(self, features_dim, bg_features_dim, hidden_dim, projection_dim,
                  n_head=4, n_layer=2, block_size=12, dropout=0.1,
                  kp_activation='tanh', predict_delta=True, max_delta=1.0,
-                 positional_bias=True, max_particles=None):
+                 positional_bias=True, max_particles=None, action_dim=None):
         super(DynamicsDLP, self).__init__()
         """
         DLP Dynamics Module (PINT)
@@ -410,7 +426,7 @@ class DynamicsDLP(nn.Module):
         self.max_delta = max_delta
         self.max_particles = max_particles  # for positional bias
         self.particle_projection = ParticleFeatureProjection(features_dim, bg_features_dim,
-                                                             hidden_dim, self.projection_dim)
+                                                             hidden_dim, self.projection_dim, action_dim=action_dim)
         self.particle_transformer = ParticleTransformer(self.projection_dim, n_head, n_layer,
                                                         block_size, self.projection_dim,
                                                         attn_pdrop=dropout, resid_pdrop=dropout,
@@ -421,7 +437,7 @@ class DynamicsDLP(nn.Module):
                                                        hidden_dim, kp_activation=kp_activation, max_delta=max_delta,
                                                        delta_features=predict_delta)
 
-    def sample(self, z, z_scale, z_obj_on, z_depth, z_features, z_bg_features, steps=10, deterministic=False):
+    def sample(self, z, z_scale, z_obj_on, z_depth, z_features, z_bg_features, steps=10, deterministic=False, action=None):
         """
         take a conditioning sequence of indices in x (of shape (b,t)) and predict the next token in
         the sequence, feeding the predictions back into the model each time. Clearly the sampling
@@ -443,8 +459,9 @@ class DynamicsDLP(nn.Module):
             z_depth_v = z_depth[:, -block_size:].reshape(-1, *z_depth.shape[2:])
             z_features_v = z_features[:, -block_size:].reshape(-1, *z_features.shape[2:])
             z_bg_features_v = z_bg_features[:, -block_size:].reshape(-1, *z_bg_features.shape[2:])
+            action = action[:, -block_size:].reshape(-1, *action.shape[2:])
             particle_projection = self.particle_projection(z_v, z_scale_v, z_obj_on_v, z_depth_v, z_features_v,
-                                                           z_bg_features_v)
+                                                           z_bg_features_v, action=action)
             # [bs * T, n_particles + 1, projection_dim]
             particle_proj_int = particle_projection
 
@@ -523,7 +540,7 @@ class DynamicsDLP(nn.Module):
 
         return z, z_scale, z_obj_on, z_depth, z_features, z_bg_features
 
-    def forward(self, z, z_scale, z_obj_on, z_depth, z_features, z_bg_features):
+    def forward(self, z, z_scale, z_obj_on, z_depth, z_features, z_bg_features, action=None):
         # forward dynamics
         # z, z_scale: [bs, T, n_particles, 2]
         # z_depth, z_obj_on: [bs, T, n_particles, 1]
@@ -537,9 +554,11 @@ class DynamicsDLP(nn.Module):
         z_depth_v = z_depth.reshape(bs * timestep_horizon, *z_depth.shape[2:])
         z_features_v = z_features.reshape(bs * timestep_horizon, *z_features.shape[2:])
         z_bg_features_v = z_bg_features.reshape(bs * timestep_horizon, *z_bg_features.shape[2:])
+        if action is not None:
+            action = action.reshape(bs * timestep_horizon, action.shape[2])
 
         particle_projection = self.particle_projection(z_v, z_scale_v, z_obj_on_v, z_depth_v, z_features_v,
-                                                       z_bg_features_v)
+                                                       z_bg_features_v, action)
         # [bs * T, n_particles + 1, projection_dim]
         particle_proj_int = particle_projection
 

@@ -53,7 +53,8 @@ class ImageMetrics(nn.Module):
 
 def eval_ddlp_im_metric(model, device, config, timestep_horizon=50, val_mode='val', eval_dir='./',
                         cond_steps=10,
-                        metrics=('ssim', 'psnr', 'lpips'), batch_size=32, verbose=False, accelerator=None):
+                        metrics=('ssim', 'psnr', 'lpips'), batch_size=32, verbose=False, accelerator=None,
+                        use_actions=False):
     if isinstance(model, torch.nn.DataParallel):
         model = model.module
     model.eval()
@@ -61,7 +62,8 @@ def eval_ddlp_im_metric(model, device, config, timestep_horizon=50, val_mode='va
     ch = config['ch']  # image channels
     image_size = config['image_size']
     root = config['root']  # dataset root
-    dataset = get_video_dataset(ds, root, seq_len=timestep_horizon, mode=val_mode, image_size=image_size)
+    dataset = get_video_dataset(ds, root, seq_len=timestep_horizon, mode=val_mode, image_size=image_size,
+                                use_actions=use_actions, episodic_on_train=False, episodic_on_val=False)
 
     dataloader = DataLoader(dataset, shuffle=False, batch_size=batch_size, num_workers=0, drop_last=False)
     model_timestep_horizon = model.timestep_horizon
@@ -75,9 +77,11 @@ def eval_ddlp_im_metric(model, device, config, timestep_horizon=50, val_mode='va
     psnrs = []
     lpipss = []
     for i, batch in enumerate(tqdm(dataloader)):
-        x = batch[0][:, :timestep_horizon].to(device)
+        x = batch.img[:, :timestep_horizon].to(device)
+        action = batch.action[:, :timestep_horizon - 1].to(device)
         with torch.no_grad():
-            generated = model.sample(x, cond_steps=cond_steps, num_steps=timestep_horizon - cond_steps)
+            generated = model.sample(x[:, :-1], action=action if use_actions else None, cond_steps=cond_steps,
+                                     num_steps=timestep_horizon - cond_steps, teacher_forcing=True)
             generated = generated.clamp(0, 1)
             assert x.shape[1] == generated.shape[1], "prediction and gt frames shape don't match"
             results = evaluator(x[:, cond_steps:].reshape(-1, *x.shape[2:]),

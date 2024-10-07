@@ -87,6 +87,7 @@ def train_ddlp(config_path='./configs/balls.json'):
     use_correlation_heatmaps = config['use_correlation_heatmaps']  # use heatmaps for tracking
     enable_enc_attn = config['enable_enc_attn']  # enable attention between patches in the particle encoder
     filtering_heuristic = config["filtering_heuristic"]  # filtering heuristic to filter prior keypoints
+    use_actions = config.get("use_actions", False)  # use action-conditioned dynamics model
 
     # optimization
     warmup_epoch = config['warmup_epoch']
@@ -114,9 +115,15 @@ def train_ddlp(config_path='./configs/balls.json'):
     start_epoch = config['start_dyn_epoch']
 
     # load data
-    dataset = get_video_dataset(ds, root, seq_len=timestep_horizon + 1, mode='train', image_size=image_size)
+    dataset = get_video_dataset(ds, root, seq_len=timestep_horizon + 1, mode='train', image_size=image_size,
+                                use_actions=use_actions)
     dataloader = DataLoader(dataset, shuffle=True, batch_size=batch_size, num_workers=4, pin_memory=True,
                             drop_last=True)
+
+    action_dim = None
+    if use_actions:
+        action_dim = dataset[0].action.shape[1]
+
     # model
     model = ObjectDynamicsDLP(cdim=ch, enc_channels=enc_channels, prior_channels=prior_channels,
                               image_size=image_size, n_kp=n_kp, learned_feature_dim=learned_feature_dim,
@@ -128,7 +135,8 @@ def train_ddlp(config_path='./configs/balls.json'):
                               scale_std=scale_std, offset_std=offset_std, obj_on_alpha=obj_on_alpha,
                               obj_on_beta=obj_on_beta, pint_layers=pint_layers, pint_heads=pint_heads,
                               pint_dim=pint_dim, use_correlation_heatmaps=use_correlation_heatmaps,
-                              enable_enc_attn=enable_enc_attn, filtering_heuristic=filtering_heuristic).to(device)
+                              enable_enc_attn=enable_enc_attn, filtering_heuristic=filtering_heuristic,
+                              action_dim=action_dim).to(device)
     print(model.info())
     # prepare saving location
     run_name = f'{ds}_ddlp_' + run_prefix
@@ -206,13 +214,14 @@ def train_ddlp(config_path='./configs/balls.json'):
 
         pbar = tqdm(iterable=dataloader)
         for batch in pbar:
-            x = batch[0].to(device)
-            action = batch[-1].to(device)
+            x = batch.img.to(device)
+            action = batch.action.to(device)
             x_prior = x  # the input image to the prior is the same as the posterior
             noisy = (epoch < (warmup_epoch + 1))
             forward_dyn = (epoch >= start_epoch)  # forward through the dynamics module
             # forward pass
-            model_output = model(x, x_prior=x_prior, warmup=(epoch < warmup_epoch), noisy=noisy, bg_masks_from_fg=False,
+            model_output = model(x, action=action if use_actions else None, x_prior=x_prior,
+                                 warmup=(epoch < warmup_epoch), noisy=noisy, bg_masks_from_fg=False,
                                  forward_dyn=forward_dyn, train_enc_prior=train_enc_prior,
                                  num_static_frames=num_static_frames)
             # calculate loss
@@ -411,8 +420,8 @@ def train_ddlp(config_path='./configs/balls.json'):
 
             save(model, optimizer, scheduler, epoch, os.path.join(save_dir, f'{ds}_ddlp{run_prefix}.pth'))
             animation_paths = animate_trajectory_ddlp(model, config, epoch, device=device, fig_dir=fig_dir,
-                                                     timestep_horizon=animation_horizon,
-                                                     num_trajetories=1, train=True, cond_steps=cond_steps)
+                                                      timestep_horizon=animation_horizon, num_trajetories=1, train=True,
+                                                      cond_steps=cond_steps, teacher_forcing=True)
             for path_id, animation_path in enumerate(animation_paths):
                 log_data[f'video_{path_id:02d}'] = wandb.Video(animation_path)
 
@@ -420,12 +429,13 @@ def train_ddlp(config_path='./configs/balls.json'):
 
             print("validation step...")
             result = evaluate_validation_elbo_dyn(model, config, epoch, batch_size=batch_size,
-                                                      recon_loss_type=recon_loss_type, device=device,
-                                                      save_image=True, fig_dir=fig_dir, topk=topk,
-                                                      recon_loss_func=recon_loss_func, beta_rec=beta_rec,
-                                                      beta_dyn=beta_dyn, iou_thresh=iou_thresh,
-                                                      timestep_horizon=timestep_horizon,
-                                                      beta_kl=beta_kl, kl_balance=kl_balance, beta_dyn_rec=beta_dyn_rec)
+                                                  recon_loss_type=recon_loss_type, device=device,
+                                                  save_image=True, fig_dir=fig_dir, topk=topk,
+                                                  recon_loss_func=recon_loss_func, beta_rec=beta_rec,
+                                                  beta_dyn=beta_dyn, iou_thresh=iou_thresh,
+                                                  timestep_horizon=timestep_horizon,
+                                                  beta_kl=beta_kl, kl_balance=kl_balance, beta_dyn_rec=beta_dyn_rec,
+                                                  use_actions=use_actions)
             valid_loss = result['elbos']
             log_str = f'validation loss: {valid_loss:.3f}\n'
             print(log_str)
@@ -452,7 +462,8 @@ def train_ddlp(config_path='./configs/balls.json'):
                 valid_imm_results = eval_ddlp_im_metric(model, device, config,
                                                         timestep_horizon=animation_horizon, val_mode='val',
                                                         eval_dir=log_dir,
-                                                        cond_steps=cond_steps, batch_size=batch_size)
+                                                        cond_steps=cond_steps, batch_size=batch_size,
+                                                        use_actions=use_actions)
 
                 log_str = f'validation: lpips: {valid_imm_results["lpips"]:.3f}, '
                 log_str += f'psnr: {valid_imm_results["psnr"]:.3f}, ssim: {valid_imm_results["ssim"]:.3f}\n'

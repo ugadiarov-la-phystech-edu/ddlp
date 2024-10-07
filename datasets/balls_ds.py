@@ -8,7 +8,7 @@ import os
 import numpy as np
 import torch
 
-from datasets.dataset_element import DatasetItem
+from datasets.dataset_item import DatasetItem
 
 
 class Balls(Dataset):

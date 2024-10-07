@@ -187,7 +187,7 @@ def evaluate_validation_elbo_dyn(model, config, epoch, batch_size=100, recon_los
                                  save_image=False, fig_dir='./', topk=5, recon_loss_func=None, beta_rec=1.0,
                                  beta_kl=1.0, beta_dyn=1.0, iou_thresh=0.2, beta_dyn_rec=1.0,
                                  kl_balance=1.0, accelerator=None, timestep_horizon=10,
-                                 animation_horizon=50):
+                                 animation_horizon=50, use_actions=False):
     model.eval()
     kp_range = model.kp_range
     # load data
@@ -196,16 +196,18 @@ def evaluate_validation_elbo_dyn(model, config, epoch, batch_size=100, recon_los
     image_size = config['image_size']
     root = config['root']  # dataset root
     cond_steps = config['cond_steps']  # dataset root
-    dataset = get_video_dataset(ds, root, seq_len=timestep_horizon + 1, mode='valid', image_size=image_size)
+    dataset = get_video_dataset(ds, root, seq_len=timestep_horizon + 1, mode='valid', image_size=image_size,
+                                use_actions=use_actions, episodic_on_val=False)
 
     dataloader = DataLoader(dataset, shuffle=True, batch_size=batch_size, num_workers=4, drop_last=False)
 
     elbos = []
     for batch in dataloader:
-        x = batch[0][:, :timestep_horizon + 1].to(device)
+        x = batch.img[:, :timestep_horizon + 1].to(device)
+        action = batch.action[:, :timestep_horizon].to(device)
         x_prior = x
         with torch.no_grad():
-            model_output = model(x, x_prior=x_prior)
+            model_output = model(x, action=action if use_actions else None, x_prior=x_prior)
             # calc elbo
             losses = model.calc_elbo(x, model_output, beta_kl=beta_kl,
                                      beta_dyn=beta_dyn, beta_rec=beta_rec, kl_balance=kl_balance,
@@ -337,8 +339,9 @@ def evaluate_validation_elbo_dyn(model, config, epoch, batch_size=100, recon_los
             result['image_obj_path'] = image_obj_path
 
         animation_paths = animate_trajectory_ddlp(model, config, epoch, device=device, fig_dir=fig_dir, prefix='valid_',
-                                timestep_horizon=animation_horizon, num_trajetories=1,
-                                accelerator=accelerator, train=False, cond_steps=cond_steps)
+                                                  timestep_horizon=animation_horizon, num_trajetories=1,
+                                                  accelerator=accelerator, train=False, cond_steps=cond_steps,
+                                                  teacher_forcing=True)
 
         result['animation_paths'] = animation_paths
     return result
@@ -346,7 +349,7 @@ def evaluate_validation_elbo_dyn(model, config, epoch, batch_size=100, recon_los
 
 def animate_trajectory_ddlp(model, config, epoch, device=torch.device('cpu'), fig_dir='./', timestep_horizon=3,
                             num_trajetories=5, accelerator=None, train=False, prefix='', cond_steps=None,
-                            deterministic=True):
+                            deterministic=True, teacher_forcing=False):
     # load data
     ds = config['ds']
     ch = config['ch']  # image channels
@@ -355,27 +358,32 @@ def animate_trajectory_ddlp(model, config, epoch, device=torch.device('cpu'), fi
     duration = config['animation_fps']
 
     mode = 'train' if train else "valid"
-    dataset = get_video_dataset(ds, root, seq_len=timestep_horizon, mode=mode, image_size=image_size)
-
+    use_actions = config.get("use_actions", False)
+    dataset = get_video_dataset(ds, root, seq_len=timestep_horizon, mode=mode, image_size=image_size,
+                                use_actions=use_actions, episodic_on_train=False, episodic_on_val=False)
     batch_size = max(2, num_trajetories)
     dataloader = DataLoader(dataset, shuffle=True, batch_size=batch_size, num_workers=4, drop_last=False)
     batch = next(iter(dataloader))
     model_timestep_horizon = model.timestep_horizon
     cond_steps = model_timestep_horizon if cond_steps is None else cond_steps
     model.eval()
-    x_horizon = batch[0][:, :timestep_horizon].to(device)
+    x_horizon = batch.img[:, :timestep_horizon - 1].to(device)
+    action = batch.action[:, :timestep_horizon - 1].to(device)
+
     # forward pass
     with torch.no_grad():
-        preds = model.sample(x_horizon, num_steps=timestep_horizon - cond_steps, deterministic=deterministic,
-                             bg_masks_from_fg=False, cond_steps=cond_steps)
+        preds = model.sample(x_horizon, action=action if use_actions else None, num_steps=timestep_horizon - cond_steps,
+                             deterministic=deterministic, bg_masks_from_fg=False, cond_steps=cond_steps,
+                             teacher_forcing=teacher_forcing)
         # preds: [bs, timestep_horizon, 3, im_size, im_size]
 
     paths = []
     for i in range(num_trajetories):
         path = os.path.join(fig_dir, f'{prefix}e{epoch}_traj_anim_{i}.gif')
         paths.append(path)
-        gt_traj = x_horizon[i].permute(0, 2, 3, 1).data.cpu().numpy()
+        gt_traj = batch.img[i, :timestep_horizon].to(device).permute(0, 2, 3, 1).data.cpu().numpy()
         pred_traj = preds[i].permute(0, 2, 3, 1).data.cpu().numpy()
+
         if accelerator is not None:
             if accelerator.is_main_process:
                 animate_trajectories(gt_traj, pred_traj, path=path, duration=duration, rec_to_pred_t=cond_steps)
