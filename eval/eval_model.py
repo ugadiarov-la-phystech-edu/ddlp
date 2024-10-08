@@ -212,7 +212,7 @@ def evaluate_validation_elbo_dyn(model, config, epoch, batch_size=100, recon_los
             losses = model.calc_elbo(x, model_output, beta_kl=beta_kl,
                                      beta_dyn=beta_dyn, beta_rec=beta_rec, kl_balance=kl_balance,
                                      recon_loss_type=recon_loss_type, recon_loss_func=recon_loss_func,
-                                     beta_dyn_rec=beta_dyn_rec)
+                                     beta_dyn_rec=beta_dyn_rec, num_static=config['num_static_frames'])
         loss = losses['loss']
 
         mu_p = model_output['kp_p']
