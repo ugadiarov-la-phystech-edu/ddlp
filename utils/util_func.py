@@ -897,4 +897,4 @@ def affine_grid_sample(x, theta, out_dims: Tuple[int, int, int, int], mode: str)
     # construct sampling grid
     grid = F.affine_grid(theta, torch.Size(out_dims), align_corners=True)
     # sample image from grid
-    return F.grid_sample(x, grid, align_corners=True, mode=mode)
+    return F.grid_sample(x.contiguous(), grid.contiguous(), align_corners=True, mode=mode)
