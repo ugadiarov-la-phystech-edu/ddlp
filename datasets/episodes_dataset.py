@@ -72,7 +72,7 @@ class EpisodesDataset(Dataset):
 
             paths = list(glob.glob(osp.join(dir_name, '*.png')))
             actual_length = len(paths) - self.sample_length + 1
-            if actual_length <= 0:
+            if actual_length <= 1:
                 warnings.warn(
                     f'Drop episode {dir_name} with length={len(paths)} as it too short for sample_length={self.sample_length}')
                 continue
