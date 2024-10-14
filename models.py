@@ -1989,7 +1989,7 @@ class ObjectDynamicsDLP(nn.Module):
         return decoder_out
 
     def sample(self, x, action=None, num_steps=10, deterministic=True, bg_masks_from_fg=False, cond_steps=None,
-               return_z=False, teacher_forcing=False):
+               return_z=False, teacher_forcing=False, return_debug=False):
         """
         (Conditioanl) Sampling from DDLP: x is the conditional frames, encoded to latent particles
          which are unrolled to the future with PINT, and the predicted particles are then decoded to a sequence
@@ -2088,9 +2088,15 @@ class ObjectDynamicsDLP(nn.Module):
             rec = torch.cat([rec, rec_dyn], dim=1)
             assert timestep_horizon_all == rec.shape[1], "prediction and gt frames shape don't match"
 
+        result = [rec]
         if return_z:
-            return rec, z_out
-        return rec
+            result.append({k: v.reshape(batch_size, timestep_horizon_all + 1, *v.shape[2:]) for k, v in z_out.items()})
+
+        if return_debug:
+            result.append({k: v.reshape(batch_size, timestep_horizon_all, *v.shape[1:]) for k, v in fg_dict.items()})
+            result.append(rec_dyn)
+
+        return result
 
     def fg_sequential_latent(self, x, deterministic=False, x_prior=None, warmup=False, noisy=False, reshape=True,
                              train_prior=False, num_static_frames=4):
