@@ -81,7 +81,7 @@ def eval_ddlp_im_metric(model, device, config, timestep_horizon=50, val_mode='va
         action = batch.action[:, :timestep_horizon - 1].to(device)
         with torch.no_grad():
             generated = model.sample(x[:, :-1], action=action if use_actions else None, cond_steps=cond_steps,
-                                     num_steps=timestep_horizon - cond_steps, teacher_forcing=True)
+                                     num_steps=timestep_horizon - cond_steps, teacher_forcing=True)[0]
             generated = generated.clamp(0, 1)
             assert x.shape[1] == generated.shape[1], "prediction and gt frames shape don't match"
             results = evaluator(x[:, cond_steps:].reshape(-1, *x.shape[2:]),

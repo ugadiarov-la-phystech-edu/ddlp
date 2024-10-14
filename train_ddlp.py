@@ -433,7 +433,7 @@ def train_ddlp(config_path='./configs/balls.json'):
                                                   save_image=True, fig_dir=fig_dir, topk=topk,
                                                   recon_loss_func=recon_loss_func, beta_rec=beta_rec,
                                                   beta_dyn=beta_dyn, iou_thresh=iou_thresh,
-                                                  timestep_horizon=timestep_horizon,
+                                                  timestep_horizon=timestep_horizon, animation_horizon=animation_horizon,
                                                   beta_kl=beta_kl, kl_balance=kl_balance, beta_dyn_rec=beta_dyn_rec,
                                                   use_actions=use_actions)
             valid_loss = result['elbos']

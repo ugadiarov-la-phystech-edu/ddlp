@@ -374,7 +374,7 @@ def animate_trajectory_ddlp(model, config, epoch, device=torch.device('cpu'), fi
     with torch.no_grad():
         preds = model.sample(x_horizon, action=action if use_actions else None, num_steps=timestep_horizon - cond_steps,
                              deterministic=deterministic, bg_masks_from_fg=False, cond_steps=cond_steps,
-                             teacher_forcing=teacher_forcing)
+                             teacher_forcing=teacher_forcing)[0]
         # preds: [bs, timestep_horizon, 3, im_size, im_size]
 
     paths = []
