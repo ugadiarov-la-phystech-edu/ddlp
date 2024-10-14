@@ -49,6 +49,13 @@ class EpisodesDataset(Dataset):
         max_action = -np.inf
         for i, f in enumerate(self.folders):
             dir_name = os.path.join(self.root, str(f))
+            paths = list(glob.glob(osp.join(dir_name, '*.png')))
+            actual_length = len(paths) - self.sample_length + 1
+            if actual_length <= 0:
+                warnings.warn(
+                    f'Drop episode {dir_name} with length={len(paths)} as it too short for sample_length={self.sample_length}')
+                continue
+
             if self.use_actions:
                 actions_path = os.path.join(dir_name, 'actions.npy')
                 assert os.path.exists(actions_path), f'{os.path.abspath(actions_path)} does not exists.'
@@ -69,13 +76,6 @@ class EpisodesDataset(Dataset):
                 if np.issubdtype(action_type, np.integer):
                     min_action = min(min_action, episode_actions.min())
                     max_action = max(max_action, episode_actions.max())
-
-            paths = list(glob.glob(osp.join(dir_name, '*.png')))
-            actual_length = len(paths) - self.sample_length + 1
-            if actual_length <= 1:
-                warnings.warn(
-                    f'Drop episode {dir_name} with length={len(paths)} as it too short for sample_length={self.sample_length}')
-                continue
 
             get_num = lambda x: int(osp.splitext(osp.basename(x))[0])
             paths.sort(key=get_num)
