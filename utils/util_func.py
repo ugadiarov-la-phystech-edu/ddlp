@@ -863,9 +863,12 @@ def calc_model_size(model):
     return {'n_params': num_trainable_params, 'size_mb': size_all_mb}
 
 
-def save(model, optimizer, scheduler, epoch, path):
+def save(model, optimizer, scheduler, epoch, best_valid_loss, best_valid_epoch, best_val_lpips, best_val_lpips_epoch,
+         path):
     torch.save({'model_state_dict': model.state_dict(), 'optimizer_state_dict': optimizer.state_dict(),
-                'scheduler_state_dict': scheduler.state_dict(), 'epoch': epoch}, path)
+                'scheduler_state_dict': scheduler.state_dict(), 'epoch': epoch, 'best_valid_loss': best_valid_loss,
+                'best_valid_epoch': best_valid_epoch, 'best_val_lpips': best_val_lpips,
+                'best_val_lpips_epoch': best_val_lpips_epoch}, path)
 
 
 def wandb_log(config, logdir, *args, **kwargs):

@@ -155,6 +155,16 @@ def train_ddlp(config_path='./configs/balls.json'):
     optimizer = optim.Adam(model.get_parameters(), lr=lr, betas=adam_betas, eps=adam_eps, weight_decay=weight_decay)
     scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=scheduler_gamma, verbose=True)
 
+    # initialize validation statistics
+    valid_loss = best_valid_loss = None
+    valid_losses = []
+    best_valid_epoch = -1
+
+    # image metrics
+    val_lpipss = []
+    best_val_lpips_epoch = -1
+    val_lpips = best_val_lpips = None
+
     pretrained_epoch = 0
     if load_model and pretrained_path is not None:
         try:
@@ -163,6 +173,10 @@ def train_ddlp(config_path='./configs/balls.json'):
             optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
             scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
             pretrained_epoch = checkpoint['epoch'] + 1
+            valid_loss = best_valid_loss = checkpoint['best_valid_loss']
+            best_valid_epoch = checkpoint['best_valid_epoch']
+            val_lpips = best_val_lpips = checkpoint['best_val_lpips']
+            best_val_lpips_epoch = checkpoint['best_val_lpips_epoch']
             print(f"loaded model from checkpoint: {pretrained_path}")
         except:
             print("model checkpoint not found")
@@ -178,19 +192,8 @@ def train_ddlp(config_path='./configs/balls.json'):
     losses_kl_depth = []
     losses_kl_obj_on = []
 
-    # initialize validation statistics
-    valid_loss = best_valid_loss = 1e8
-    valid_losses = []
-    best_valid_epoch = 0
-
     # save PSNR values of the reconstruction
     psnrs = []
-
-    # image metrics
-    if eval_im_metrics:
-        val_lpipss = []
-        best_val_lpips_epoch = 0
-        val_lpips = best_val_lpips = 1e8
 
     # iteration counter for discounting, we warm-up the dynamics loss
     iter_per_epoch = 1 * len(dataloader)
@@ -418,7 +421,8 @@ def train_ddlp(config_path='./configs/balls.json'):
                           dim=0).data.cpu(), image_obj_path, nrow=8, pad_value=1)
             log_data['vis_obj'] = wandb.Image(image_obj_path)
 
-            save(model, optimizer, scheduler, epoch, os.path.join(save_dir, f'{ds}_ddlp{run_prefix}.pth'))
+            save(model, optimizer, scheduler, epoch, best_valid_loss, best_valid_epoch, best_val_lpips,
+                 best_val_lpips_epoch, os.path.join(save_dir, f'{ds}_ddlp{run_prefix}.pth'))
             animation_paths = animate_trajectory_ddlp(model, config, epoch, device=device, fig_dir=fig_dir,
                                                       timestep_horizon=animation_horizon, num_trajetories=1, train=True,
                                                       cond_steps=cond_steps, teacher_forcing=True)
@@ -440,13 +444,14 @@ def train_ddlp(config_path='./configs/balls.json'):
             log_str = f'validation loss: {valid_loss:.3f}\n'
             print(log_str)
             log_line(log_dir, log_str)
-            if best_valid_loss > valid_loss:
+            do_save_best_weights = False
+            if best_valid_loss is None or best_valid_loss > valid_loss:
                 log_str = f'validation loss updated: {best_valid_loss:.3f} -> {valid_loss:.3f}\n'
                 print(log_str)
                 log_line(log_dir, log_str)
                 best_valid_loss = valid_loss
                 best_valid_epoch = epoch
-                save(model, optimizer, scheduler, epoch, os.path.join(save_dir, f'{ds}_ddlp{run_prefix}_best.pth'))
+                do_save_best_weights = True
 
             valid_log_data = {'loss': valid_loss, 'best loss': best_valid_loss, 'best loss epoch': best_valid_epoch}
             for key in ('image_path', 'image_obj_path'):
@@ -458,6 +463,7 @@ def train_ddlp(config_path='./configs/balls.json'):
                     valid_log_data[f'video_{path_id:02d}'] = wandb.Video(animation_path)
 
             torch.cuda.empty_cache()
+            do_save_best_lpips_weights = False
             if eval_im_metrics and epoch > 0:
                 valid_imm_results = eval_ddlp_im_metric(model, device, config,
                                                         timestep_horizon=animation_horizon, val_mode='val',
@@ -470,19 +476,29 @@ def train_ddlp(config_path='./configs/balls.json'):
                 val_lpips = valid_imm_results['lpips']
                 print(log_str)
                 log_line(log_dir, log_str)
-                if (not torch.isinf(torch.tensor(val_lpips))) and (best_val_lpips > val_lpips):
+                if (not torch.isinf(torch.tensor(val_lpips))) and (best_val_lpips is None or best_val_lpips > val_lpips):
                     log_str = f'validation lpips updated: {best_val_lpips:.3f} -> {val_lpips:.3f}\n'
                     print(log_str)
                     log_line(log_dir, log_str)
                     best_val_lpips = val_lpips
                     best_val_lpips_epoch = epoch
-                    save(model, optimizer, scheduler, epoch,
-                         os.path.join(save_dir, f'{ds}_ddlp{run_prefix}_best_lpips.pth'))
+                    do_save_best_lpips_weights = True
 
                 valid_log_data.update(
                     {key: value for key, value in valid_imm_results.items() if key in ('lpips', 'psnr', 'ssim')})
                 valid_log_data.update({'best lpips': best_val_lpips, 'best lpips epoch': best_val_lpips_epoch})
                 torch.cuda.empty_cache()
+
+            if do_save_best_weights:
+                save(model, optimizer, scheduler, epoch, best_valid_loss, best_valid_epoch, best_val_lpips,
+                     best_val_lpips_epoch, os.path.join(save_dir, f'{ds}_ddlp{run_prefix}_best.pth'))
+
+            if do_save_best_lpips_weights:
+                save(model, optimizer, scheduler, epoch, best_valid_loss, best_valid_epoch, best_val_lpips,
+                     best_val_lpips_epoch, os.path.join(save_dir, f'{ds}_ddlp{run_prefix}_best_lpips.pth'))
+
+            save(model, optimizer, scheduler, epoch, best_valid_loss, best_valid_epoch, best_val_lpips,
+                     best_val_lpips_epoch, os.path.join(save_dir, f'{ds}_ddlp{run_prefix}.pth'))
             log_data.update({f'val/{key}': value for key, value in valid_log_data.items()})
 
         wandb_log(config, log_dir, log_data)
