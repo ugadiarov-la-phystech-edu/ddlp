@@ -502,7 +502,7 @@ def plot_bb_on_image_batch_from_masks(mask_batch_tensor, img_batch_tensor, thick
 
 
 def prepare_logdir(runname, src_dir='./', accelerator=None):
-    td_prefix = datetime.datetime.now().strftime("%d%m%y_%H%M%S")
+    td_prefix = datetime.datetime.now().strftime("%y%m%d_%H%M%S")
     dir_name = f'{td_prefix}_{runname}'
     path_to_dir = os.path.join(src_dir, dir_name)
     path_to_fig_dir = os.path.join(path_to_dir, 'figures')
