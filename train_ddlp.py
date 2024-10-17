@@ -1,6 +1,8 @@
 """
 Single-GPU training of DDLP
 """
+import math
+
 # imports
 import numpy as np
 import os
@@ -156,14 +158,14 @@ def train_ddlp(config_path='./configs/balls.json'):
     scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=scheduler_gamma, verbose=True)
 
     # initialize validation statistics
-    valid_loss = best_valid_loss = None
+    valid_loss = best_valid_loss = math.inf
     valid_losses = []
     best_valid_epoch = -1
 
     # image metrics
     val_lpipss = []
     best_val_lpips_epoch = -1
-    val_lpips = best_val_lpips = None
+    val_lpips = best_val_lpips = math.inf
 
     pretrained_epoch = 0
     if load_model and pretrained_path is not None:
@@ -445,7 +447,7 @@ def train_ddlp(config_path='./configs/balls.json'):
             print(log_str)
             log_line(log_dir, log_str)
             do_save_best_weights = False
-            if best_valid_loss is None or best_valid_loss > valid_loss:
+            if math.isinf(best_valid_loss) or best_valid_loss > valid_loss:
                 log_str = f'validation loss updated: {best_valid_loss:.3f} -> {valid_loss:.3f}\n'
                 print(log_str)
                 log_line(log_dir, log_str)
@@ -476,7 +478,7 @@ def train_ddlp(config_path='./configs/balls.json'):
                 val_lpips = valid_imm_results['lpips']
                 print(log_str)
                 log_line(log_dir, log_str)
-                if (not torch.isinf(torch.tensor(val_lpips))) and (best_val_lpips is None or best_val_lpips > val_lpips):
+                if (not torch.isinf(torch.tensor(val_lpips))) and (math.isinf(best_val_lpips) is None or best_val_lpips > val_lpips):
                     log_str = f'validation lpips updated: {best_val_lpips:.3f} -> {val_lpips:.3f}\n'
                     print(log_str)
                     log_line(log_dir, log_str)
