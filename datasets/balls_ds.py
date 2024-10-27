@@ -5,11 +5,9 @@ https://github.com/zhixuan-lin/G-SWM
 from torch.utils.data import Dataset, DataLoader
 import h5py
 import os
-import numpy as np
 import torch
 
-from datasets.dataset_element import DatasetItem
-
+from datasets.dataset_item import DatasetItem
 
 class Balls(Dataset):
     def __init__(self, root, mode, ep_len=100, sample_length=20):
