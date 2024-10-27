@@ -2,6 +2,7 @@
 Single-GPU training of DDLP
 """
 import math
+import traceback
 
 # imports
 import numpy as np
@@ -434,61 +435,70 @@ def train_ddlp(config_path='./configs/balls.json'):
             log_data = {f'train/{key}': value for key, value in log_data.items()}
 
             print("validation step...")
-            result = evaluate_validation_elbo_dyn(model, config, epoch, batch_size=batch_size,
-                                                  recon_loss_type=recon_loss_type, device=device,
-                                                  save_image=True, fig_dir=fig_dir, topk=topk,
-                                                  recon_loss_func=recon_loss_func, beta_rec=beta_rec,
-                                                  beta_dyn=beta_dyn, iou_thresh=iou_thresh,
-                                                  timestep_horizon=timestep_horizon, animation_horizon=animation_horizon,
-                                                  beta_kl=beta_kl, kl_balance=kl_balance, beta_dyn_rec=beta_dyn_rec,
-                                                  use_actions=use_actions)
-            valid_loss = result['elbos']
-            log_str = f'validation loss: {valid_loss:.3f}\n'
-            print(log_str)
-            log_line(log_dir, log_str)
             do_save_best_weights = False
-            if math.isinf(best_valid_loss) or best_valid_loss > valid_loss:
-                log_str = f'validation loss updated: {best_valid_loss:.3f} -> {valid_loss:.3f}\n'
+            valid_log_data = {}
+            try:
+                result = evaluate_validation_elbo_dyn(model, config, epoch, batch_size=batch_size,
+                                                      recon_loss_type=recon_loss_type, device=device,
+                                                      save_image=True, fig_dir=fig_dir, topk=topk,
+                                                      recon_loss_func=recon_loss_func, beta_rec=beta_rec,
+                                                      beta_dyn=beta_dyn, iou_thresh=iou_thresh,
+                                                      timestep_horizon=timestep_horizon, animation_horizon=animation_horizon,
+                                                      beta_kl=beta_kl, kl_balance=kl_balance, beta_dyn_rec=beta_dyn_rec,
+                                                      use_actions=use_actions)
+                valid_loss = result['elbos']
+                log_str = f'validation loss: {valid_loss:.3f}\n'
                 print(log_str)
                 log_line(log_dir, log_str)
-                best_valid_loss = valid_loss
-                best_valid_epoch = epoch
-                do_save_best_weights = True
-
-            valid_log_data = {'loss': valid_loss, 'best loss': best_valid_loss, 'best loss epoch': best_valid_epoch}
-            for key in ('image_path', 'image_obj_path'):
-                if key in result:
-                    valid_log_data[key] = wandb.Image(result[key])
-
-            if 'animation_paths' in result:
-                for path_id, animation_path in enumerate(result['animation_paths']):
-                    valid_log_data[f'video_{path_id:02d}'] = wandb.Video(animation_path)
-
-            torch.cuda.empty_cache()
-            do_save_best_lpips_weights = False
-            if eval_im_metrics and epoch > 0:
-                valid_imm_results = eval_ddlp_im_metric(model, device, config,
-                                                        timestep_horizon=animation_horizon, val_mode='val',
-                                                        eval_dir=log_dir,
-                                                        cond_steps=cond_steps, batch_size=batch_size,
-                                                        use_actions=use_actions)
-
-                log_str = f'validation: lpips: {valid_imm_results["lpips"]:.3f}, '
-                log_str += f'psnr: {valid_imm_results["psnr"]:.3f}, ssim: {valid_imm_results["ssim"]:.3f}\n'
-                val_lpips = valid_imm_results['lpips']
-                print(log_str)
-                log_line(log_dir, log_str)
-                if (not torch.isinf(torch.tensor(val_lpips))) and (math.isinf(best_val_lpips) is None or best_val_lpips > val_lpips):
-                    log_str = f'validation lpips updated: {best_val_lpips:.3f} -> {val_lpips:.3f}\n'
+                if math.isinf(best_valid_loss) or best_valid_loss > valid_loss:
+                    log_str = f'validation loss updated: {best_valid_loss:.3f} -> {valid_loss:.3f}\n'
                     print(log_str)
                     log_line(log_dir, log_str)
-                    best_val_lpips = val_lpips
-                    best_val_lpips_epoch = epoch
-                    do_save_best_lpips_weights = True
+                    best_valid_loss = valid_loss
+                    best_valid_epoch = epoch
+                    do_save_best_weights = True
 
-                valid_log_data.update(
-                    {key: value for key, value in valid_imm_results.items() if key in ('lpips', 'psnr', 'ssim')})
-                valid_log_data.update({'best lpips': best_val_lpips, 'best lpips epoch': best_val_lpips_epoch})
+                valid_log_data = {'loss': valid_loss, 'best loss': best_valid_loss, 'best loss epoch': best_valid_epoch}
+                for key in ('image_path', 'image_obj_path'):
+                    if key in result:
+                        valid_log_data[key] = wandb.Image(result[key])
+
+                if 'animation_paths' in result:
+                    for path_id, animation_path in enumerate(result['animation_paths']):
+                        valid_log_data[f'video_{path_id:02d}'] = wandb.Video(animation_path)
+            except Exception:
+                print(traceback.format_exc())
+            finally:
+                torch.cuda.empty_cache()
+
+            do_save_best_lpips_weights = False
+            try:
+                if eval_im_metrics and epoch > 0:
+                    valid_imm_results = eval_ddlp_im_metric(model, device, config,
+                                                            timestep_horizon=animation_horizon, val_mode='val',
+                                                            eval_dir=log_dir,
+                                                            cond_steps=cond_steps, batch_size=batch_size,
+                                                            use_actions=use_actions)
+
+                    log_str = f'validation: lpips: {valid_imm_results["lpips"]:.3f}, '
+                    log_str += f'psnr: {valid_imm_results["psnr"]:.3f}, ssim: {valid_imm_results["ssim"]:.3f}\n'
+                    val_lpips = valid_imm_results['lpips']
+                    print(log_str)
+                    log_line(log_dir, log_str)
+                    if (not torch.isinf(torch.tensor(val_lpips))) and (math.isinf(best_val_lpips) is None or best_val_lpips > val_lpips):
+                        log_str = f'validation lpips updated: {best_val_lpips:.3f} -> {val_lpips:.3f}\n'
+                        print(log_str)
+                        log_line(log_dir, log_str)
+                        best_val_lpips = val_lpips
+                        best_val_lpips_epoch = epoch
+                        do_save_best_lpips_weights = True
+
+                    valid_log_data.update(
+                        {key: value for key, value in valid_imm_results.items() if key in ('lpips', 'psnr', 'ssim')})
+                    valid_log_data.update({'best lpips': best_val_lpips, 'best lpips epoch': best_val_lpips_epoch})
+            except Exception:
+                print(traceback.format_exc())
+            finally:
                 torch.cuda.empty_cache()
 
             if do_save_best_weights:
