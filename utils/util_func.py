@@ -889,9 +889,10 @@ JIT scripts
 def correlate(x, kernel):
     groups = kernel.shape[0]
     output = F.conv2d(x, kernel, padding=0, groups=groups, stride=1, bias=None)
-    norm = torch.sqrt(torch.sum(kernel ** 2) * F.conv2d(x ** 2, torch.ones_like(kernel), groups=groups,
-                                                        bias=None, stride=1, padding=0) + 1e-10)
-    output = output / (norm + 1e-5)
+    norm = torch.sqrt(torch.clamp(
+        torch.sum(kernel ** 2) * F.conv2d(x ** 2, torch.ones_like(kernel), groups=groups, bias=None, stride=1,
+                                          padding=0), min=1e-5))
+    output = output / norm
     return output
 
 
