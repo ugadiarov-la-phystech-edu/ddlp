@@ -170,19 +170,16 @@ def train_ddlp(config_path='./configs/balls.json'):
 
     pretrained_epoch = 0
     if load_model and pretrained_path is not None:
-        try:
-            checkpoint = torch.load(pretrained_path, map_location=device)
-            model.load_state_dict(checkpoint['model_state_dict'])
-            optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-            scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
-            pretrained_epoch = checkpoint['epoch'] + 1
-            valid_loss = best_valid_loss = checkpoint['best_valid_loss']
-            best_valid_epoch = checkpoint['best_valid_epoch']
-            val_lpips = best_val_lpips = checkpoint['best_val_lpips']
-            best_val_lpips_epoch = checkpoint['best_val_lpips_epoch']
-            print(f"loaded model from checkpoint: {pretrained_path}")
-        except:
-            print("model checkpoint not found")
+        checkpoint = torch.load(pretrained_path, map_location=device)
+        model.load_state_dict(checkpoint['model_state_dict'])
+        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+        pretrained_epoch = checkpoint['epoch'] + 1
+        valid_loss = best_valid_loss = checkpoint['best_valid_loss']
+        best_valid_epoch = checkpoint['best_valid_epoch']
+        val_lpips = best_val_lpips = checkpoint['best_val_lpips']
+        best_val_lpips_epoch = checkpoint['best_val_lpips_epoch']
+        print(f"loaded model from checkpoint: {pretrained_path}")
 
     # log statistics
     losses = []
