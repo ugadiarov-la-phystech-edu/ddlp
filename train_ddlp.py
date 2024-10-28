@@ -423,13 +423,17 @@ def train_ddlp(config_path='./configs/balls.json'):
 
             save(model, optimizer, scheduler, epoch, best_valid_loss, best_valid_epoch, best_val_lpips,
                  best_val_lpips_epoch, os.path.join(save_dir, f'{ds}_ddlp{run_prefix}.pth'))
-            animation_paths = animate_trajectory_ddlp(model, config, epoch, device=device, fig_dir=fig_dir,
-                                                      timestep_horizon=animation_horizon, num_trajetories=1, train=True,
-                                                      cond_steps=cond_steps, teacher_forcing=True)
-            for path_id, animation_path in enumerate(animation_paths):
-                log_data[f'video_{path_id:02d}'] = wandb.Video(animation_path)
 
-            log_data = {f'train/{key}': value for key, value in log_data.items()}
+            try:
+                animation_paths = animate_trajectory_ddlp(model, config, epoch, device=device, fig_dir=fig_dir,
+                                                          timestep_horizon=animation_horizon, num_trajetories=1, train=True,
+                                                          cond_steps=cond_steps, teacher_forcing=True)
+                for path_id, animation_path in enumerate(animation_paths):
+                    log_data[f'video_{path_id:02d}'] = wandb.Video(animation_path)
+
+                log_data = {f'train/{key}': value for key, value in log_data.items()}
+            except Exception:
+                print('Animate trajector with DDL\n' + traceback.format_exc())
 
             print("validation step...")
             do_save_best_weights = False
