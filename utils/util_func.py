@@ -5,7 +5,6 @@ Utility functions for logging and plotting.
 """
 # imports
 import inspect
-import math
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -890,9 +889,9 @@ JIT scripts
 def correlate(x, kernel):
     batch_size = x.size()[0]
     groups, channels = kernel.size()[:2]
+    kernel_size = kernel.size()[-2:]
     output = F.conv2d(x, kernel, padding=0, groups=groups, stride=1, bias=None)
-    x_square_sum = F.avg_pool2d(x ** 2, kernel_size=kernel.size()[-2:], stride=1, padding=0) * math.prod(
-        kernel.size()[-2:])
+    x_square_sum = F.avg_pool2d(x ** 2, kernel_size=kernel_size, stride=1, padding=0) * (kernel_size[0] * kernel_size[1])
 
     # sum over channels to match the output of grouped conv2d
     x_square_sum = x_square_sum.reshape(batch_size, groups, channels, *output.size()[-2:]).sum(dim=2)
