@@ -894,7 +894,7 @@ def correlate(x, kernel):
     x_square_sum = F.avg_pool2d(x ** 2, kernel_size=kernel_size, stride=1, padding=0) * (kernel_size[0] * kernel_size[1])
 
     # sum over channels to match the output of grouped conv2d
-    x_square_sum = x_square_sum.reshape(batch_size, groups, channels, *output.size()[-2:]).sum(dim=2)
+    x_square_sum = x_square_sum.reshape(batch_size, groups, channels, output.size()[-2], output.size()[-1]).sum(dim=2)
     norm = torch.sqrt(torch.sum(kernel ** 2) * x_square_sum)
     output = output / (norm + 1e-5)
     return output
