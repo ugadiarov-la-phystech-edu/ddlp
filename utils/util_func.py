@@ -5,6 +5,7 @@ Utility functions for logging and plotting.
 """
 # imports
 import inspect
+import math
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -887,12 +888,16 @@ JIT scripts
 
 @torch.jit.script
 def correlate(x, kernel):
-    groups = kernel.shape[0]
+    batch_size = x.size()[0]
+    groups, channels = kernel.size()[:2]
     output = F.conv2d(x, kernel, padding=0, groups=groups, stride=1, bias=None)
-    norm = torch.sqrt(torch.clamp(
-        torch.sum(kernel ** 2) * F.conv2d(x ** 2, torch.ones_like(kernel), groups=groups, bias=None, stride=1,
-                                          padding=0), min=1e-10))
-    output = output / norm
+    x_square_sum = F.avg_pool2d(x ** 2, kernel_size=kernel.size()[-2:], stride=1, padding=0) * math.prod(
+        kernel.size()[-2:])
+
+    # sum over channels to match the output of grouped conv2d
+    x_square_sum = x_square_sum.reshape(batch_size, groups, channels, *output.size()[-2:]).sum(dim=2)
+    norm = torch.sqrt(torch.sum(kernel ** 2) * x_square_sum)
+    output = output / (norm + 1e-5)
     return output
 
 
