@@ -179,7 +179,7 @@ def evaluate_validation_elbo(model, config, epoch, batch_size=100, recon_loss_ty
         if image_obj_path is not None:
             result['image_obj_path'] = image_obj_path
 
-    return np.mean(elbos)
+    return result
 
 
 def evaluate_validation_elbo_dyn(model, config, epoch, batch_size=100, recon_loss_type="vgg",
