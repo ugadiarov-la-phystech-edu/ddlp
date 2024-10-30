@@ -44,7 +44,7 @@
     32,
     64
   ],
-  "timestep_horizon": 10,
+  "timestep_horizon": 0,
   "predict_delta": true,
   "beta_dyn": 40.0,
   "scale_std": 0.3,
@@ -70,7 +70,8 @@
   "start_dyn_epoch": 0,
   "cond_steps": 10,
   "animation_fps": 0.06,
-  "use_correlation_heatmaps": true,
+  "use_correlation_heatmaps": false,
+  "use_tracking": false,
   "enable_enc_attn": false,
   "filtering_heuristic": "variance",
   "use_actions": true,

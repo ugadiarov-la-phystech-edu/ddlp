@@ -378,7 +378,7 @@ def train_dlp(config_path='./configs/shapes.json'):
                           dim=0).data.cpu(), image_obj_path, nrow=8, pad_value=1)
             log_data['vis_obj'] = wandb.Image(image_obj_path)
             save(model, optimizer, scheduler, epoch, best_valid_loss, best_valid_epoch, best_val_lpips,
-                 best_val_lpips_epoch, os.path.join(save_dir, f'{ds}_ddlp{run_prefix}.pth'))
+                 best_val_lpips_epoch, os.path.join(save_dir, f'{ds}_dlp{run_prefix}.pth'))
             log_data = {f'train/{key}': value for key, value in log_data.items()}
             print("validation step...")
             result = evaluate_validation_elbo(model, config, epoch, batch_size=batch_size,
@@ -432,14 +432,14 @@ def train_dlp(config_path='./configs/shapes.json'):
 
             if do_save_best_weights:
                 save(model, optimizer, scheduler, epoch, best_valid_loss, best_valid_epoch, best_val_lpips,
-                     best_val_lpips_epoch, os.path.join(save_dir, f'{ds}_ddlp{run_prefix}_best.pth'))
+                     best_val_lpips_epoch, os.path.join(save_dir, f'{ds}_dlp{run_prefix}_best.pth'))
 
             if do_save_best_lpips_weights:
                 save(model, optimizer, scheduler, epoch, best_valid_loss, best_valid_epoch, best_val_lpips,
-                     best_val_lpips_epoch, os.path.join(save_dir, f'{ds}_ddlp{run_prefix}_best_lpips.pth'))
+                     best_val_lpips_epoch, os.path.join(save_dir, f'{ds}_dlp{run_prefix}_best_lpips.pth'))
 
             save(model, optimizer, scheduler, epoch, best_valid_loss, best_valid_epoch, best_val_lpips,
-                 best_val_lpips_epoch, os.path.join(save_dir, f'{ds}_ddlp{run_prefix}.pth'))
+                 best_val_lpips_epoch, os.path.join(save_dir, f'{ds}_dlp{run_prefix}.pth'))
             log_data.update({f'val/{key}': value for key, value in valid_log_data.items()})
 
         wandb_log(config, log_dir, log_data)
