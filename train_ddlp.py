@@ -85,6 +85,7 @@ def train_ddlp(config_path='./configs/balls.json'):
     patch_size = config['patch_size']  # prior patch size
     anchor_s = config['anchor_s']  # posterior patch/glimpse ratio of image size
     learned_feature_dim = config['learned_feature_dim']
+    bg_learned_feature_dim = config.get('bg_learned_feature_dim', None)
     dropout = config['dropout']
     use_resblock = config['use_resblock']
     use_correlation_heatmaps = config['use_correlation_heatmaps']  # use heatmaps for tracking
@@ -130,7 +131,7 @@ def train_ddlp(config_path='./configs/balls.json'):
     # model
     model = ObjectDynamicsDLP(cdim=ch, enc_channels=enc_channels, prior_channels=prior_channels,
                               image_size=image_size, n_kp=n_kp, learned_feature_dim=learned_feature_dim,
-                              pad_mode=pad_mode, sigma=sigma,
+                              pad_mode=pad_mode, sigma=sigma, bg_learned_feature_dim=bg_learned_feature_dim,
                               dropout=dropout, patch_size=patch_size, n_kp_enc=n_kp_enc,
                               n_kp_prior=n_kp_prior, kp_range=kp_range, kp_activation=kp_activation,
                               anchor_s=anchor_s, use_resblock=use_resblock,
