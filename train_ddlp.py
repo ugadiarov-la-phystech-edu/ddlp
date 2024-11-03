@@ -48,6 +48,7 @@ def train_ddlp(config_path='./configs/balls.json'):
     root = config['root']  # dataset root
     animation_horizon = config['animation_horizon']
     batch_size = config['batch_size']
+    max_norm = config.get('max_norm', 0.5)
     lr = config['lr']
     num_epochs = config['num_epochs']
     topk = min(config['topk'], config['n_kp_enc'])  # top-k particles to plot
@@ -215,6 +216,7 @@ def train_ddlp(config_path='./configs/balls.json'):
         batch_losses_kl_depth = []
         batch_losses_kl_obj_on = []
         batch_psnrs = []
+        batch_grad_norms = []
 
         pbar = tqdm(iterable=dataloader)
         for batch in pbar:
@@ -252,6 +254,7 @@ def train_ddlp(config_path='./configs/balls.json'):
             loss = all_losses['loss']
             optimizer.zero_grad()
             loss.backward()
+            batch_grad_norms.append(torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=max_norm).item())
             optimizer.step()
 
             # output for logging and plotting
@@ -321,12 +324,15 @@ def train_ddlp(config_path='./configs/balls.json'):
         # scheduler
         scheduler.step()
 
+        batch_grad_norms = np.array(batch_grad_norms)
         log_data = {'epoch': epoch, 'loss': losses[-1], 'rec': losses_rec[-1], 'kl': losses_kl[-1],
-                          'kl_balance': kl_balance, 'kl_kp': losses_kl_kp[-1], 'kl_feat': losses_kl_feat[-1],
-                          'kl_scale': losses_kl_scale[-1], 'kl_depth': losses_kl_depth[-1],
-                          'kl_obj_on': losses_kl_obj_on[-1],
-                          'kl_dyn': losses_kl_dyn[-1], 'mu max': mu_tot.max(), 'mu min': mu_tot.min(),
-                          'mu offset max': mu_offset.max(), 'mu offset min': mu_offset.min(),}
+                    'kl_balance': kl_balance, 'kl_kp': losses_kl_kp[-1], 'kl_feat': losses_kl_feat[-1],
+                    'kl_scale': losses_kl_scale[-1], 'kl_depth': losses_kl_depth[-1], 'kl_obj_on': losses_kl_obj_on[-1],
+                    'kl_dyn': losses_kl_dyn[-1], 'mu max': mu_tot.max(), 'mu min': mu_tot.min(),
+                    'mu offset max': mu_offset.max(), 'mu offset min': mu_offset.min(),
+                    'min_grad_norm': batch_grad_norms.min(), 'mean_grad_norm': batch_grad_norms.mean(),
+                    'max_grad_norm': batch_grad_norms.max(),
+                    }
 
         # epoch summary
         log_str = f'epoch {epoch} summary\n'
