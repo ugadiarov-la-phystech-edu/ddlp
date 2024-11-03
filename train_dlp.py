@@ -89,6 +89,7 @@ def train_dlp(config_path='./configs/shapes.json'):
     use_tracking = config['use_tracking']
     enable_enc_attn = config['enable_enc_attn']  # enable attention between patches in the particle encoder
     filtering_heuristic = config["filtering_heuristic"]  # filtering heuristic to filter prior keypoints
+    max_beta_coef = config.get('max_beta_coef', 100)
 
     # optimization
     warmup_epoch = config['warmup_epoch']
@@ -122,7 +123,8 @@ def train_dlp(config_path='./configs/shapes.json'):
                       scale_std=scale_std, offset_std=offset_std, obj_on_alpha=obj_on_alpha,
                       obj_on_beta=obj_on_beta,
                       use_correlation_heatmaps=use_correlation_heatmaps, use_tracking=use_tracking,
-                      enable_enc_attn=enable_enc_attn, filtering_heuristic=filtering_heuristic).to(device)
+                      enable_enc_attn=enable_enc_attn, filtering_heuristic=filtering_heuristic,
+                      max_beta_coef=max_beta_coef).to(device)
     print(model.info())
     # prepare saving location
     run_name = f'{ds}_dlp_' + run_prefix

@@ -24,7 +24,7 @@ class FgDLP(nn.Module):
                  patch_size=16, n_kp_enc=20, n_kp_prior=20, learned_feature_dim=16,
                  kp_range=(-1, 1), kp_activation="tanh", anchor_s=0.25,
                  use_resblock=False, use_correlation_heatmaps=True, enable_enc_attn=False,
-                 filtering_heuristic='variance'):
+                 filtering_heuristic='variance', max_beta_coef=100):
         super(FgDLP, self).__init__()
         """
         DLP Foreground Module -- extract objects from an image
@@ -68,6 +68,7 @@ class FgDLP(nn.Module):
         self.use_resblock = use_resblock
         self.use_correlation_heatmaps = use_correlation_heatmaps
         self.enable_enc_attn = enable_enc_attn
+        self.max_beta_coef = max_beta_coef
         assert filtering_heuristic in ['distance', 'variance',
                                        'random', 'none'], f'unknown filtering heuristic: {filtering_heuristic}'
         self.filtering_heuristic = filtering_heuristic
@@ -209,8 +210,8 @@ class FgDLP(nn.Module):
         mu_tot = z_base + mu_offset
         logvar_tot = logvar_offset
 
-        obj_on_a = lobj_on_a.exp().clamp_min(1e-5)
-        obj_on_b = lobj_on_b.exp().clamp_min(1e-5)
+        obj_on_a = self.max_beta_coef * torch.sigmoid(lobj_on_a) + 1e-5
+        obj_on_b = self.max_beta_coef * torch.sigmoid(lobj_on_b) + 1e-5
         # if torch.isnan(obj_on_a).any():
         #     print(f'obj_on_a has nan')
         #     # torch.nan_to_num_(obj_on_a, nan=0.01)
@@ -993,7 +994,8 @@ class ObjectDLP(nn.Module):
                  bg_learned_feature_dim=None,
                  kp_range=(-1, 1), kp_activation="tanh", anchor_s=0.25, use_tracking=False,
                  use_resblock=False, scale_std=0.3, offset_std=0.2, obj_on_alpha=0.1, obj_on_beta=0.1,
-                 use_correlation_heatmaps=False, enable_enc_attn=False, filtering_heuristic='variance'):
+                 use_correlation_heatmaps=False, enable_enc_attn=False, filtering_heuristic='variance',
+                 max_beta_coef=100):
         super(ObjectDLP, self).__init__()
         """
         cdim: channels of the input image (3...)
@@ -1065,7 +1067,7 @@ class ObjectDLP(nn.Module):
                                kp_activation=kp_activation, anchor_s=anchor_s,
                                use_resblock=self.use_resblock,
                                use_correlation_heatmaps=use_correlation_heatmaps, enable_enc_attn=enable_enc_attn,
-                               filtering_heuristic=filtering_heuristic)
+                               filtering_heuristic=filtering_heuristic, max_beta_coef=max_beta_coef)
 
         # background module
         self.bg_module = BgDLP(cdim=cdim, enc_channels=enc_channels, image_size=image_size, pad_mode=pad_mode,
