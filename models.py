@@ -1656,7 +1656,7 @@ class ObjectDynamicsDLP(nn.Module):
                  kp_range=(-1, 1), kp_activation="tanh", anchor_s=0.25, predict_delta=True,
                  timestep_horizon=10, enable_enc_attn=False, use_correlation_heatmaps=True,
                  use_resblock=False, scale_std=0.3, offset_std=0.2, obj_on_alpha=0.1, obj_on_beta=0.1, pint_layers=6,
-                 pint_heads=8, pint_dim=256, filtering_heuristic='variance', action_dim=None):
+                 pint_heads=8, pint_dim=256, filtering_heuristic='variance', max_beta_coef=100, action_dim=None):
         super(ObjectDynamicsDLP, self).__init__()
         """
         cdim: channels of the input image (3...)
@@ -1733,7 +1733,8 @@ class ObjectDynamicsDLP(nn.Module):
                                n_kp_prior=n_kp_prior, learned_feature_dim=learned_feature_dim, kp_range=kp_range,
                                kp_activation=kp_activation, anchor_s=anchor_s,
                                use_resblock=self.use_resblock, use_correlation_heatmaps=use_correlation_heatmaps,
-                               enable_enc_attn=self.enable_enc_attn, filtering_heuristic=filtering_heuristic)
+                               enable_enc_attn=self.enable_enc_attn, filtering_heuristic=filtering_heuristic,
+                               max_beta_coef=max_beta_coef)
         # background module
         self.bg_module = BgDLP(cdim=cdim, enc_channels=enc_channels, image_size=image_size, pad_mode=pad_mode,
                                dropout=dropout, learned_feature_dim=self.bg_learned_feature_dim, n_kp_enc=n_kp_enc,

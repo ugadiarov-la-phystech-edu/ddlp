@@ -93,6 +93,7 @@ def train_ddlp(config_path='./configs/balls.json'):
     enable_enc_attn = config['enable_enc_attn']  # enable attention between patches in the particle encoder
     filtering_heuristic = config["filtering_heuristic"]  # filtering heuristic to filter prior keypoints
     use_actions = config.get("use_actions", False)  # use action-conditioned dynamics model
+    max_beta_coef = config.get("max_beta_coef", 100)
 
     # optimization
     warmup_epoch = config['warmup_epoch']
@@ -141,7 +142,7 @@ def train_ddlp(config_path='./configs/balls.json'):
                               obj_on_beta=obj_on_beta, pint_layers=pint_layers, pint_heads=pint_heads,
                               pint_dim=pint_dim, use_correlation_heatmaps=use_correlation_heatmaps,
                               enable_enc_attn=enable_enc_attn, filtering_heuristic=filtering_heuristic,
-                              action_dim=action_dim).to(device)
+                              max_beta_coef=max_beta_coef, action_dim=action_dim).to(device)
     print(model.info())
     # prepare saving location
     run_name = f'{ds}_ddlp_' + run_prefix
