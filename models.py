@@ -209,8 +209,9 @@ class FgDLP(nn.Module):
         mu_tot = z_base + mu_offset
         logvar_tot = logvar_offset
 
-        obj_on_a = lobj_on_a.exp().clamp_min(1e-5)
-        obj_on_b = lobj_on_b.exp().clamp_min(1e-5)
+        max_beta_coef = 100
+        obj_on_a = max_beta_coef * torch.sigmoid(lobj_on_a) + 1e-5
+        obj_on_b = max_beta_coef * torch.sigmoid(lobj_on_b) + 1e-5
         # if torch.isnan(obj_on_a).any():
         #     print(f'obj_on_a has nan')
         #     # torch.nan_to_num_(obj_on_a, nan=0.01)
