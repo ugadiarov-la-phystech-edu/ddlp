@@ -224,7 +224,7 @@ def train_ddlp(config_path='./configs/balls.json'):
             action = batch.action.to(device)
             x_prior = x  # the input image to the prior is the same as the posterior
             noisy = (epoch < (warmup_epoch + 1))
-            forward_dyn = (epoch >= start_epoch)  # forward through the dynamics module
+            forward_dyn = beta_dyn > 0 and (epoch >= start_epoch)  # forward through the dynamics module
             # forward pass
             model_output = model(x, action=action if use_actions else None, x_prior=x_prior,
                                  warmup=(epoch < warmup_epoch), noisy=noisy, bg_masks_from_fg=False,
