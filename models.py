@@ -1656,7 +1656,8 @@ class ObjectDynamicsDLP(nn.Module):
                  kp_range=(-1, 1), kp_activation="tanh", anchor_s=0.25, predict_delta=True,
                  timestep_horizon=10, enable_enc_attn=False, use_correlation_heatmaps=True,
                  use_resblock=False, scale_std=0.3, offset_std=0.2, obj_on_alpha=0.1, obj_on_beta=0.1, pint_layers=6,
-                 pint_heads=8, pint_dim=256, filtering_heuristic='variance', max_beta_coef=100, action_dim=None):
+                 pint_heads=8, pint_dim=256, filtering_heuristic='variance', max_beta_coef=100, action_dim=None,
+                 mu_scale_prior=None):
         super(ObjectDynamicsDLP, self).__init__()
         """
         cdim: channels of the input image (3...)
@@ -1719,8 +1720,12 @@ class ObjectDynamicsDLP(nn.Module):
 
         # priors
         self.register_buffer('logvar_kp', torch.log(torch.tensor(sigma ** 2)))
+
+        if mu_scale_prior is None:
+            mu_scale_prior = self.anchor_s
         self.register_buffer('mu_scale_prior',
-                             torch.tensor(np.log(0.75 * self.anchor_s / (1 - 0.75 * self.anchor_s + 1e-5))))
+                             torch.tensor(np.log(0.75 * mu_scale_prior / (1 - 0.75 * mu_scale_prior + 1e-5))))
+
         self.register_buffer('logvar_scale_p', torch.log(torch.tensor(scale_std ** 2)))
         self.register_buffer('logvar_offset_p', torch.log(torch.tensor(offset_std ** 2)))
         self.register_buffer('obj_on_a_p', torch.tensor(obj_on_alpha))

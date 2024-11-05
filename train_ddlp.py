@@ -85,6 +85,7 @@ def train_ddlp(config_path='./configs/balls.json'):
     n_kp_enc = config['n_kp_enc']  # total posterior kp
     patch_size = config['patch_size']  # prior patch size
     anchor_s = config['anchor_s']  # posterior patch/glimpse ratio of image size
+    mu_scale_prior = config.get('mu_scale_prior', None)
     learned_feature_dim = config['learned_feature_dim']
     bg_learned_feature_dim = config.get('bg_learned_feature_dim', None)
     dropout = config['dropout']
@@ -142,7 +143,7 @@ def train_ddlp(config_path='./configs/balls.json'):
                               obj_on_beta=obj_on_beta, pint_layers=pint_layers, pint_heads=pint_heads,
                               pint_dim=pint_dim, use_correlation_heatmaps=use_correlation_heatmaps,
                               enable_enc_attn=enable_enc_attn, filtering_heuristic=filtering_heuristic,
-                              max_beta_coef=max_beta_coef, action_dim=action_dim).to(device)
+                              max_beta_coef=max_beta_coef, action_dim=action_dim, mu_scale_prior=mu_scale_prior).to(device)
     print(model.info())
     # prepare saving location
     run_name = f'{ds}_ddlp_' + run_prefix
