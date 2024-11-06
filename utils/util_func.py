@@ -875,7 +875,7 @@ def wandb_log(config, logdir, *args, **kwargs):
     if wandb.run is None:
         resume = 'never' if config['wandb_run_id'] is None else 'must'
         wandb.init(project=config['wandb_project'], group=config['wandb_group'], name=config['wandb_run_name'],
-                   id=config['wandb_run_id'], resume=resume, dir=logdir)
+                   id=config['wandb_run_id'], resume=resume, dir=logdir, config=config)
 
     wandb.log(*args, **kwargs)
 
