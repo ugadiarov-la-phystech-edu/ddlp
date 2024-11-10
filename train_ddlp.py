@@ -34,7 +34,7 @@ torch.backends.cudnn.benchmark = False
 torch.backends.cudnn.deterministic = True
 
 
-def train_ddlp(config_path='./configs/balls.json'):
+def train_ddlp(config_path='./configs/balls.json', num_workers=4):
     # load config
     try:
         config = get_config(config_path)
@@ -124,7 +124,7 @@ def train_ddlp(config_path='./configs/balls.json'):
     # load data
     dataset = get_video_dataset(ds, root, seq_len=timestep_horizon + 1, mode='train', image_size=image_size,
                                 use_actions=use_actions)
-    dataloader = DataLoader(dataset, shuffle=True, batch_size=batch_size, num_workers=4, pin_memory=True,
+    dataloader = DataLoader(dataset, shuffle=True, batch_size=batch_size, num_workers=num_workers, pin_memory=True,
                             drop_last=True)
 
     action_dim = None
@@ -560,6 +560,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="DDLP Single-GPU Training")
     parser.add_argument("-d", "--dataset", type=str, default='balls',
                         help="dataset of to train the model on: ['traffic', 'clevrer', 'obj3d128', 'phyre']")
+    parser.add_argument("--num_workers", type=int, default=4)
     args = parser.parse_args()
     ds = args.dataset
     if ds.endswith('json'):
@@ -567,4 +568,4 @@ if __name__ == "__main__":
     else:
         conf_path = os.path.join('./configs', f'{ds}.json')
 
-    train_ddlp(conf_path)
+    train_ddlp(conf_path, num_workers=args.num_workers)
