@@ -474,15 +474,15 @@ class DynamicsDLP(nn.Module):
             action = action[:, -block_size:].reshape(-1, *action.shape[2:])
             particle_projection = self.particle_projection(z_v, z_scale_v, z_obj_on_v, z_depth_v, z_features_v,
                                                            z_bg_features_v, action=action)
-            # [bs * T, n_particles + 1, projection_dim]
+            # [bs * T, n_particles + 1 + 1, projection_dim]
             particle_proj_int = particle_projection
 
             # unroll forward
             particle_proj_int = particle_proj_int.view(bs, -1, *particle_proj_int.shape[1:])
-            # [bs, T, n_particles + 1, 2 * projection_dim]
+            # [bs, T, n_particles + 1 + 1, 2 * projection_dim]
             particle_proj_int = particle_proj_int.permute(0, 2, 1, 3)
-            # [bs, n_particles + 1, T, 2 * projection_dim]
-            particles_trans = self.particle_transformer(particle_proj_int)
+            # [bs, n_particles + 1 + 1, T, 2 * projection_dim]
+            particles_trans = self.particle_transformer(particle_proj_int)[:, :n_particles + 1]
             # [bs * (n_particles + 1), T, projection_dim] or [bs, (n_particles + 1), T, projection_dim]
             particles_trans = particles_trans[:, :, -1]  # [bs, (n_particles + 1), projection_dim]
             # [bs, n_particles + 1, projection_dim]
