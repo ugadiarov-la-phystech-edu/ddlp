@@ -95,6 +95,7 @@ def train_ddlp(config_path='./configs/balls.json', num_workers=4):
     filtering_heuristic = config["filtering_heuristic"]  # filtering heuristic to filter prior keypoints
     use_actions = config.get("use_actions", False)  # use action-conditioned dynamics model
     max_beta_coef = config.get("max_beta_coef", 100)
+    duplicate_on_episode_start = config.get("duplicate_on_episode_start", False) # populate the context with duplicated frame in the beginning of the episode
 
     # optimization
     warmup_epoch = config['warmup_epoch']
@@ -123,7 +124,7 @@ def train_ddlp(config_path='./configs/balls.json', num_workers=4):
 
     # load data
     dataset = get_video_dataset(ds, root, seq_len=timestep_horizon + 1, mode='train', image_size=image_size,
-                                use_actions=use_actions)
+                                use_actions=use_actions, duplicate_on_episode_start=duplicate_on_episode_start)
     dataloader = DataLoader(dataset, shuffle=True, batch_size=batch_size, num_workers=num_workers, pin_memory=True,
                             drop_last=True)
 

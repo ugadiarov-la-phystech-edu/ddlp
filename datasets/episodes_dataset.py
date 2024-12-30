@@ -1,4 +1,5 @@
 import argparse
+import collections
 import warnings
 
 import numpy as np
@@ -17,7 +18,7 @@ ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 class EpisodesDataset(Dataset):
     def __init__(self, root, mode, sample_length=1, res=128, episodic_on_train=False, episodic_on_val=False,
-                 use_actions=False):
+                 use_actions=False, duplicate_on_episode_start=False):
         assert mode in ['train', 'val', 'valid']
         if mode == 'valid':
             mode = 'val'
@@ -28,6 +29,8 @@ class EpisodesDataset(Dataset):
         self.mode = mode
         self.episodic = (self.mode == 'train' and episodic_on_train) or (self.mode == 'val' and episodic_on_val)
         self.sample_length = sample_length
+        self.duplicate_on_episode_start = duplicate_on_episode_start
+        assert sample_length > 1 or not duplicate_on_episode_start, 'Duplication can be used only for video'
 
         # Get all numbers
         self.folders = []
@@ -55,6 +58,9 @@ class EpisodesDataset(Dataset):
                 warnings.warn(
                     f'Drop episode {dir_name} with length={len(paths)} as it too short for sample_length={self.sample_length}')
                 continue
+
+            if self.duplicate_on_episode_start:
+                actual_length = len(paths) - 1
 
             if self.use_actions:
                 actions_path = os.path.join(dir_name, 'actions.npy')
@@ -100,26 +106,35 @@ class EpisodesDataset(Dataset):
             ep = self.index2episode[index]
             # Implement continuous indexing
             offset = self.episode2offset[ep]
-            begin = index - offset
-            end = begin + self.sample_length
+            end = (index + 1) - offset + 1
+            begin = end - self.sample_length
 
         if self.use_actions:
-            action = torch.as_tensor(self.actions[ep][begin: end - 1])
+            actual_begin = max(begin, 0)
+            action = torch.as_tensor(self.actions[ep][actual_begin: end - 1])
             if self.action_space == 'discrete':
                 action = torch.nn.functional.one_hot(action, num_classes=self.n_actions)
 
             action = action.to(torch.float32)
+            if actual_begin != begin:
+                assert self.duplicate_on_episode_start
+                empty_action = torch.zeros(size=(actual_begin - begin, *action.size()[1:]), dtype=action.dtype)
+                action = torch.cat([empty_action, action], dim=0)
         else:
             action = torch.zeros(0)
 
-        imgs = []
-        for image_index in range(begin, end):
-            img = Image.open(self.episode_images[ep][image_index])
-            img = img.resize((self.res, self.res))
-            img = transforms.ToTensor()(img)[:3]
-            imgs.append(img)
+        revered_sequence_images = []
+        for image_index in reversed(range(begin, end)):
+            if image_index < 0:
+                assert self.duplicate_on_episode_start
+                revered_sequence_images.append(revered_sequence_images[-1])
+            else:
+                img = Image.open(self.episode_images[ep][image_index])
+                img = img.resize((self.res, self.res))
+                img = transforms.ToTensor()(img)[:3]
+                revered_sequence_images.append(img)
 
-        return DatasetItem(img=torch.stack(imgs, dim=0).float(), action=action)
+        return DatasetItem(img=torch.stack(revered_sequence_images, dim=0).float()[::-1], action=action)
 
     def __len__(self):
         if self.episodic:

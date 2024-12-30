@@ -90,6 +90,7 @@ def train_dlp(config_path='./configs/shapes.json'):
     enable_enc_attn = config['enable_enc_attn']  # enable attention between patches in the particle encoder
     filtering_heuristic = config["filtering_heuristic"]  # filtering heuristic to filter prior keypoints
     max_beta_coef = config.get('max_beta_coef', 100)
+    duplicate_on_episode_start = config.get("duplicate_on_episode_start", False) # populate the context with duplicated frame in the beginning of the episode
 
     # optimization
     warmup_epoch = config['warmup_epoch']
@@ -108,7 +109,8 @@ def train_dlp(config_path='./configs/shapes.json'):
 
     # load data
     if timestep_horizon > 0:
-        dataset = get_video_dataset(ds, root, seq_len=timestep_horizon + 1, mode='train', image_size=image_size)
+        dataset = get_video_dataset(ds, root, seq_len=timestep_horizon + 1, mode='train', image_size=image_size,
+                                    duplicate_on_episode_start=duplicate_on_episode_start)
     else:
         dataset = get_image_dataset(ds, root, mode='train', image_size=image_size)
     dataloader = DataLoader(dataset, shuffle=True, batch_size=batch_size, num_workers=4, pin_memory=True,
