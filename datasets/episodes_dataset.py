@@ -134,7 +134,7 @@ class EpisodesDataset(Dataset):
                 img = transforms.ToTensor()(img)[:3]
                 revered_sequence_images.append(img)
 
-        return DatasetItem(img=torch.stack(revered_sequence_images, dim=0).float()[::-1], action=action)
+        return DatasetItem(img=torch.stack(revered_sequence_images[::-1], dim=0).float(), action=action)
 
     def __len__(self):
         if self.episodic:
