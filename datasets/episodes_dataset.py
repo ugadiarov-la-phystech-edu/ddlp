@@ -106,8 +106,12 @@ class EpisodesDataset(Dataset):
             ep = self.index2episode[index]
             # Implement continuous indexing
             offset = self.episode2offset[ep]
-            end = (index + 1) - offset + 1
-            begin = end - self.sample_length
+            if self.duplicate_on_episode_start:
+                end = (index + 1) - offset + 1
+                begin = end - self.sample_length
+            else:
+                begin = index - offset
+                end = begin + self.sample_length
 
         if self.use_actions:
             actual_begin = max(begin, 0)
