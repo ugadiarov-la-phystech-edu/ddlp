@@ -189,6 +189,7 @@ if __name__ == '__main__':
     parser.add_argument('--resize_to', type=int, default=128)
     parser.add_argument('--max_read_workers', type=int, default=2)
     parser.add_argument('--max_write_workers', type=int, default=1)
+    parser.add_argument('--batch_size', type=int, default=32)
     parser.add_argument('--device', type=str, default='cuda')
     args = parser.parse_args()
 
@@ -227,11 +228,17 @@ if __name__ == '__main__':
         x = data['images'].to(args.device)
         x = torch.cat([x[:1].expand((model.timestep_horizon - 1, -1, -1, -1)), x], dim=0)
         x = x.unfold(dimension=0, size=model.timestep_horizon + 1, step=1).permute((0, 4, 1, 2, 3)).contiguous()
-        dlp_output = model(x, deterministic=True, x_prior=x, warmup=False, noisy=False, forward_dyn=True,
-                           train_enc_prior=config['train_enc_prior'], num_static_frames=config['num_static_frames'],
-                           predict_next=False)
-        foreground_representations = get_fg_representation(dlp_output, model.timestep_horizon)
-        background_representations = get_bg_representation(dlp_output, model.timestep_horizon)
+        foreground_representations = []
+        background_representations = []
+        for batch in torch.split(x, args.batch_size):
+            dlp_output = model(batch, deterministic=True, x_prior=batch, warmup=False, noisy=False, forward_dyn=True,
+                               train_enc_prior=config['train_enc_prior'], num_static_frames=config['num_static_frames'],
+                               predict_next=False)
+            foreground_representations.append(get_fg_representation(dlp_output, model.timestep_horizon))
+            background_representations.append(get_bg_representation(dlp_output, model.timestep_horizon))
+
+        foreground_representations = np.concatenate(foreground_representations)
+        background_representations = np.concatenate(background_representations)
         actions = data['actions']
         actions = np.concatenate(
             [np.zeros((model.timestep_horizon - 1, *actions.shape[1:]), dtype=np.float32,), actions],
