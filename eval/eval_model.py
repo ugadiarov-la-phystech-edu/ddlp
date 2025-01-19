@@ -196,18 +196,18 @@ def evaluate_validation_elbo_dyn(model, config, epoch, batch_size=100, recon_los
     image_size = config['image_size']
     root = config['root']  # dataset root
     cond_steps = config['cond_steps']  # dataset root
-    dataset = get_video_dataset(ds, root, seq_len=timestep_horizon + 1, mode='valid', image_size=image_size,
+    dataset = get_video_dataset(ds, root, seq_len=timestep_horizon + int(model.dynamics), mode='valid', image_size=image_size,
                                 use_actions=use_actions, episodic_on_val=False)
 
     dataloader = DataLoader(dataset, shuffle=True, batch_size=batch_size, num_workers=4, drop_last=False)
 
     elbos = []
     for batch in dataloader:
-        x = batch.img[:, :timestep_horizon + 1].to(device)
+        x = batch.img[:, :timestep_horizon + int(model.dynamics)].to(device)
         action = batch.action[:, :timestep_horizon].to(device)
         x_prior = x
         with torch.no_grad():
-            model_output = model(x, action=action if use_actions else None, x_prior=x_prior)
+            model_output = model(x, action=action if use_actions else None, x_prior=x_prior, predict_next=model.dynamics)
             # calc elbo
             losses = model.calc_elbo(x, model_output, beta_kl=beta_kl,
                                      beta_dyn=beta_dyn, beta_rec=beta_rec, kl_balance=kl_balance,
@@ -338,12 +338,13 @@ def evaluate_validation_elbo_dyn(model, config, epoch, batch_size=100, recon_los
         if image_obj_path is not None:
             result['image_obj_path'] = image_obj_path
 
-        animation_paths = animate_trajectory_ddlp(model, config, epoch, device=device, fig_dir=fig_dir, prefix='valid_',
-                                                  timestep_horizon=animation_horizon, num_trajetories=1,
-                                                  accelerator=accelerator, train=False, cond_steps=cond_steps,
-                                                  teacher_forcing=True)
+        if model.dynamics:
+            animation_paths = animate_trajectory_ddlp(model, config, epoch, device=device, fig_dir=fig_dir,
+                                                      prefix='valid_', timestep_horizon=animation_horizon,
+                                                      num_trajetories=1, accelerator=accelerator, train=False,
+                                                      cond_steps=cond_steps, teacher_forcing=True)
 
-        result['animation_paths'] = animation_paths
+            result['animation_paths'] = animation_paths
     return result
 
 

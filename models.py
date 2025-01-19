@@ -1046,6 +1046,7 @@ class ObjectDLP(nn.Module):
         self.use_tracking = use_tracking
         self.use_correlation_heatmaps = use_correlation_heatmaps and self.use_tracking
         self.enable_enc_attn = enable_enc_attn
+        self.dynamics = False
         assert filtering_heuristic in ['distance', 'variance',
                                        'random', 'none'], f'unknown filtering heuristic: {filtering_heuristic}'
         self.filtering_heuristic = filtering_heuristic
@@ -1657,7 +1658,7 @@ class ObjectDynamicsDLP(nn.Module):
                  timestep_horizon=10, enable_enc_attn=False, use_correlation_heatmaps=True,
                  use_resblock=False, scale_std=0.3, offset_std=0.2, obj_on_alpha=0.1, obj_on_beta=0.1, pint_layers=6,
                  pint_heads=8, pint_dim=256, filtering_heuristic='variance', max_beta_coef=100, action_dim=None,
-                 mu_scale_prior=None):
+                 mu_scale_prior=None, dynamics=True):
         super(ObjectDynamicsDLP, self).__init__()
         """
         cdim: channels of the input image (3...)
@@ -1713,6 +1714,7 @@ class ObjectDynamicsDLP(nn.Module):
         self.pint_layers = pint_layers
         self.pint_heads = pint_heads
         self.pint_dim = pint_dim
+        self.dynamics = dynamics
         assert filtering_heuristic in ['distance', 'variance',
                                        'random', 'none'], f'unknown filtering heuristic: {filtering_heuristic}'
         self.filtering_heuristic = filtering_heuristic
@@ -1746,19 +1748,23 @@ class ObjectDynamicsDLP(nn.Module):
                                use_resblock=self.use_resblock)
 
         # dynamics module
-        max_particles = n_kp_enc + 1  # particle positional bias, +1 for the bg particle
-        pint_inner_dim = self.pint_dim
-        self.dyn_module = DynamicsDLP(learned_feature_dim, self.bg_learned_feature_dim, hidden_dim=pint_inner_dim,
-                                      projection_dim=pint_inner_dim,
-                                      n_head=self.pint_heads, n_layer=self.pint_layers, block_size=timestep_horizon,
-                                      kp_activation=kp_activation, predict_delta=self.predict_delta, max_delta=1.0,
-                                      positional_bias=True, max_particles=max_particles, action_dim=self.action_dim)
+        if self.dynamics:
+            max_particles = n_kp_enc + 1  # particle positional bias, +1 for the bg particle
+            pint_inner_dim = self.pint_dim
+            self.dyn_module = DynamicsDLP(learned_feature_dim, self.bg_learned_feature_dim, hidden_dim=pint_inner_dim,
+                                          projection_dim=pint_inner_dim,
+                                          n_head=self.pint_heads, n_layer=self.pint_layers, block_size=timestep_horizon,
+                                          kp_activation=kp_activation, predict_delta=self.predict_delta, max_delta=1.0,
+                                          positional_bias=True, max_particles=max_particles, action_dim=self.action_dim)
         self.init_weights()
 
-    def get_parameters(self, prior=True, encoder=True, decoder=True, dynamics=True):
+    def get_parameters(self, prior=True, encoder=True, decoder=True, dynamics=None):
         parameters = []
         parameters.extend(self.fg_module.get_parameters(prior, encoder, decoder))
         parameters.extend(self.bg_module.get_parameters(prior, encoder, decoder))
+        if dynamics is None:
+            dynamics = self.dynamics
+
         if dynamics:
             parameters.extend(self.dyn_module.parameters())
         return parameters
@@ -1794,10 +1800,12 @@ class ObjectDynamicsDLP(nn.Module):
         # tracking
         log_str += f'correlation maps for tracking: {self.fg_module.use_correlation_heatmaps}\n'
         # dynamic module
-        log_str += f'pint relative positional bias: {self.dyn_module.particle_transformer.positional_bias}\n'
-        pint_size_dict = calc_model_size(self.dyn_module)
-        pint_n_params = pint_size_dict['n_params']
-        log_str += f'pint trainable parameters: {pint_n_params} ({pint_n_params / (10 ** 6):.4f}M)\n'
+        if self.dynamics:
+            log_str += f'pint relative positional bias: {self.dyn_module.particle_transformer.positional_bias}\n'
+            pint_size_dict = calc_model_size(self.dyn_module)
+            pint_n_params = pint_size_dict['n_params']
+            log_str += f'pint trainable parameters: {pint_n_params} ({pint_n_params / (10 ** 6):.4f}M)\n'
+
         # num parameters and model size
         size_dict = calc_model_size(self)
         size_mb = size_dict['size_mb']
@@ -2003,6 +2011,7 @@ class ObjectDynamicsDLP(nn.Module):
          which are unrolled to the future with PINT, and the predicted particles are then decoded to a sequence
          of RGB images.
         """
+        assert self.dynamics, f'Can sample only from dynamics model, but self.dynamics={self.dynamics}'
         # x: [bs, T, ...]
         # encode-decode
         batch_size, timestep_horizon_all = x.size(0), x.size(1)
@@ -2482,13 +2491,13 @@ class ObjectDynamicsDLP(nn.Module):
 
     def forward(self, x, action=None, deterministic=False, bg_masks_from_fg=False, x_prior=None, warmup=False,
                 noisy=False,
-                forward_dyn=True, train_enc_prior=True, num_static_frames=4, predict_next=True):
+                sequential=True, train_enc_prior=True, num_static_frames=4, predict_next=True):
         # x: [bs, T + 1, ...]
         batch_size, timestep_horizon = x.size(0), x.size(1)
         # timestep_horizon = timestep_horizon - 1
 
         x_in = x.view(-1, *x.shape[2:])  # [bs * T, ...]
-        if forward_dyn:
+        if sequential:
             # tracking
             fg_dict = self.fg_sequential_opt(x, deterministic=deterministic, x_prior=x_prior, warmup=warmup,
                                              noisy=noisy,
@@ -2543,7 +2552,7 @@ class ObjectDynamicsDLP(nn.Module):
         rec = bg_mask * bg + dec_objects_trans
 
         # dynamics - all but the last timestep
-        if predict_next and forward_dyn:
+        if predict_next:
             # forward PINT
             z_v = z.view(batch_size, timestep_horizon, *z.shape[1:])[:, :-1]
             z_scale_v = z_scale.view(batch_size, timestep_horizon, *z_scale.shape[1:])[:, :-1]
@@ -2683,21 +2692,22 @@ class ObjectDynamicsDLP(nn.Module):
         alpha_masks = model_output['alpha_masks']  # [batch_size, n_kp, 1, h, w]
 
         # dynamics stuff
-        mu_dyn = model_output['mu_dyn']
-        logvar_dyn = model_output['logvar_dyn']
-        mu_features_dyn = model_output['mu_features_dyn']
-        logvar_features_dyn = model_output['logvar_features_dyn']
-        obj_on_a_dyn = model_output['obj_on_a_dyn']
-        obj_on_b_dyn = model_output['obj_on_b_dyn']
-        mu_depth_dyn = model_output['mu_depth_dyn']
-        logvar_depth_dyn = model_output['logvar_depth_dyn']
-        mu_scale_dyn = model_output['mu_scale_dyn']
-        logvar_scale_dyn = model_output['logvar_scale_dyn']
-        mu_bg_features_dyn = model_output['mu_bg_dyn']
-        logvar_bg_features_dyn = model_output['logvar_bg_dyn']
+        if self.dynamics:
+            mu_dyn = model_output['mu_dyn']
+            logvar_dyn = model_output['logvar_dyn']
+            mu_features_dyn = model_output['mu_features_dyn']
+            logvar_features_dyn = model_output['logvar_features_dyn']
+            obj_on_a_dyn = model_output['obj_on_a_dyn']
+            obj_on_b_dyn = model_output['obj_on_b_dyn']
+            mu_depth_dyn = model_output['mu_depth_dyn']
+            logvar_depth_dyn = model_output['logvar_depth_dyn']
+            mu_scale_dyn = model_output['mu_scale_dyn']
+            logvar_scale_dyn = model_output['logvar_scale_dyn']
+            mu_bg_features_dyn = model_output['mu_bg_dyn']
+            logvar_bg_features_dyn = model_output['logvar_bg_dyn']
 
         batch_size = x.shape[0]
-        timestep_horizon = self.timestep_horizon
+        timestep_horizon = self.timestep_horizon - int(not self.dynamics)
         x = x.view(-1, *x.shape[2:])
         static_scale = 1
         dyn_scale = 1
@@ -2857,7 +2867,7 @@ class ObjectDynamicsDLP(nn.Module):
         # --- kl-divergence for t >= tau --- #
         # dynamics
         # transparency
-        if beta_dyn > 0:
+        if self.dynamics and beta_dyn > 0:
             obj_on_a_post = obj_on_a.reshape(batch_size, timestep_horizon + 1, *obj_on_a.shape[1:])[:, num_static:]
             obj_on_b_post = obj_on_b.reshape(batch_size, timestep_horizon + 1, *obj_on_b.shape[1:])[:, num_static:]
 

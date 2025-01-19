@@ -116,6 +116,7 @@ def train_ddlp(config_path='./configs/balls.json', num_workers=4):
     obj_on_beta = config['obj_on_beta']  # transparency beta distribution "b"
 
     # transformer - PINT
+    dynamics = config.get('dynamics', True)
     pint_layers = config['pint_layers']
     pint_heads = config['pint_heads']
     pint_dim = config['pint_dim']
@@ -123,7 +124,7 @@ def train_ddlp(config_path='./configs/balls.json', num_workers=4):
     start_epoch = config['start_dyn_epoch']
 
     # load data
-    dataset = get_video_dataset(ds, root, seq_len=timestep_horizon + 1, mode='train', image_size=image_size,
+    dataset = get_video_dataset(ds, root, seq_len=timestep_horizon + int(dynamics), mode='train', image_size=image_size,
                                 use_actions=use_actions, duplicate_on_episode_start=duplicate_on_episode_start)
     dataloader = DataLoader(dataset, shuffle=True, batch_size=batch_size, num_workers=num_workers, pin_memory=True,
                             drop_last=True)
@@ -144,7 +145,8 @@ def train_ddlp(config_path='./configs/balls.json', num_workers=4):
                               obj_on_beta=obj_on_beta, pint_layers=pint_layers, pint_heads=pint_heads,
                               pint_dim=pint_dim, use_correlation_heatmaps=use_correlation_heatmaps,
                               enable_enc_attn=enable_enc_attn, filtering_heuristic=filtering_heuristic,
-                              max_beta_coef=max_beta_coef, action_dim=action_dim, mu_scale_prior=mu_scale_prior).to(device)
+                              max_beta_coef=max_beta_coef, action_dim=action_dim, mu_scale_prior=mu_scale_prior,
+                              dynamics=dynamics).to(device)
     print(model.info())
     # prepare saving location
     run_name = f'{ds}_ddlp_' + run_prefix
@@ -227,11 +229,12 @@ def train_ddlp(config_path='./configs/balls.json', num_workers=4):
             action = batch.action.to(device)
             x_prior = x  # the input image to the prior is the same as the posterior
             noisy = (epoch < (warmup_epoch + 1))
-            forward_dyn = beta_dyn > 0 and (epoch >= start_epoch)  # forward through the dynamics module
+            predict_next = dynamics and beta_dyn > 0 and (epoch >= start_epoch) # forward through the dynamics module
+            sequential = epoch >= start_epoch
             # forward pass
             model_output = model(x, action=action if use_actions else None, x_prior=x_prior,
                                  warmup=(epoch < warmup_epoch), noisy=noisy, bg_masks_from_fg=False,
-                                 forward_dyn=forward_dyn, train_enc_prior=train_enc_prior,
+                                 predict_next=predict_next, sequential=sequential, train_enc_prior=train_enc_prior,
                                  num_static_frames=num_static_frames)
             # calculate loss
             if epoch >= start_epoch:
@@ -434,16 +437,17 @@ def train_ddlp(config_path='./configs/balls.json', num_workers=4):
             save(model, optimizer, scheduler, epoch, best_valid_loss, best_valid_epoch, best_val_lpips,
                  best_val_lpips_epoch, os.path.join(save_dir, f'{ds}_ddlp{run_prefix}.pth'))
 
-            try:
-                animation_paths = animate_trajectory_ddlp(model, config, epoch, device=device, fig_dir=fig_dir,
-                                                          timestep_horizon=animation_horizon, num_trajetories=1, train=True,
-                                                          cond_steps=cond_steps, teacher_forcing=True)
-                for path_id, animation_path in enumerate(animation_paths):
-                    log_data[f'video_{path_id:02d}'] = wandb.Video(animation_path)
+            if dynamics:
+                try:
+                    animation_paths = animate_trajectory_ddlp(model, config, epoch, device=device, fig_dir=fig_dir,
+                                                              timestep_horizon=animation_horizon, num_trajetories=1, train=True,
+                                                              cond_steps=cond_steps, teacher_forcing=True)
+                    for path_id, animation_path in enumerate(animation_paths):
+                        log_data[f'video_{path_id:02d}'] = wandb.Video(animation_path)
 
-                log_data = {f'train/{key}': value for key, value in log_data.items()}
-            except Exception:
-                print('Animate trajector with DDL\n' + traceback.format_exc())
+                    log_data = {f'train/{key}': value for key, value in log_data.items()}
+                except Exception:
+                    print('Animate trajector with DDL\n' + traceback.format_exc())
 
             print("validation step...")
             do_save_best_weights = False
@@ -483,34 +487,35 @@ def train_ddlp(config_path='./configs/balls.json', num_workers=4):
                 torch.cuda.empty_cache()
 
             do_save_best_lpips_weights = False
-            try:
-                if eval_im_metrics and epoch > 0:
-                    valid_imm_results = eval_ddlp_im_metric(model, device, config,
-                                                            timestep_horizon=animation_horizon, val_mode='val',
-                                                            eval_dir=log_dir,
-                                                            cond_steps=cond_steps, batch_size=batch_size,
-                                                            use_actions=use_actions)
+            if dynamics:
+                try:
+                    if eval_im_metrics and epoch > 0:
+                        valid_imm_results = eval_ddlp_im_metric(model, device, config,
+                                                                timestep_horizon=animation_horizon, val_mode='val',
+                                                                eval_dir=log_dir,
+                                                                cond_steps=cond_steps, batch_size=batch_size,
+                                                                use_actions=use_actions)
 
-                    log_str = f'validation: lpips: {valid_imm_results["lpips"]:.3f}, '
-                    log_str += f'psnr: {valid_imm_results["psnr"]:.3f}, ssim: {valid_imm_results["ssim"]:.3f}\n'
-                    val_lpips = valid_imm_results['lpips']
-                    print(log_str)
-                    log_line(log_dir, log_str)
-                    if (not torch.isinf(torch.tensor(val_lpips))) and (math.isinf(best_val_lpips) is None or best_val_lpips > val_lpips):
-                        log_str = f'validation lpips updated: {best_val_lpips:.3f} -> {val_lpips:.3f}\n'
+                        log_str = f'validation: lpips: {valid_imm_results["lpips"]:.3f}, '
+                        log_str += f'psnr: {valid_imm_results["psnr"]:.3f}, ssim: {valid_imm_results["ssim"]:.3f}\n'
+                        val_lpips = valid_imm_results['lpips']
                         print(log_str)
                         log_line(log_dir, log_str)
-                        best_val_lpips = val_lpips
-                        best_val_lpips_epoch = epoch
-                        do_save_best_lpips_weights = True
+                        if (not torch.isinf(torch.tensor(val_lpips))) and (math.isinf(best_val_lpips) is None or best_val_lpips > val_lpips):
+                            log_str = f'validation lpips updated: {best_val_lpips:.3f} -> {val_lpips:.3f}\n'
+                            print(log_str)
+                            log_line(log_dir, log_str)
+                            best_val_lpips = val_lpips
+                            best_val_lpips_epoch = epoch
+                            do_save_best_lpips_weights = True
 
-                    valid_log_data.update(
-                        {key: value for key, value in valid_imm_results.items() if key in ('lpips', 'psnr', 'ssim')})
-                    valid_log_data.update({'best lpips': best_val_lpips, 'best lpips epoch': best_val_lpips_epoch})
-            except Exception:
-                print(traceback.format_exc())
-            finally:
-                torch.cuda.empty_cache()
+                        valid_log_data.update(
+                            {key: value for key, value in valid_imm_results.items() if key in ('lpips', 'psnr', 'ssim')})
+                        valid_log_data.update({'best lpips': best_val_lpips, 'best lpips epoch': best_val_lpips_epoch})
+                except Exception:
+                    print(traceback.format_exc())
+                finally:
+                    torch.cuda.empty_cache()
 
             if do_save_best_weights:
                 save(model, optimizer, scheduler, epoch, best_valid_loss, best_valid_epoch, best_val_lpips,
