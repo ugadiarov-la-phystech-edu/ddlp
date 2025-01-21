@@ -547,8 +547,8 @@ def log_line(src_dir, line):
     with open(log_file, 'a') as fp:
         fp.writelines(line)
 
-def animate_trajectories(orig_trajectory, pred_trajectory, path='./traj_anim.gif', duration=4 / 50, rec_to_pred_t=10,
-                         title=None):
+
+def put_labels(orig_trajectory, pred_trajectory, rec_to_pred_t, border_size=2):
     # rec_to_pred_t: the timestep from which prediction transitions from reconstruction to generation
     # prepare images
     font = cv2.FONT_HERSHEY_SIMPLEX
@@ -558,7 +558,6 @@ def animate_trajectories(orig_trajectory, pred_trajectory, path='./traj_anim.gif
     gt_border_color = (255, 0, 0)
     rec_border_color = (0, 0, 255)
     gen_border_color = (0, 255, 0)
-    border_size = 2
     thickness = 1
     gt_traj_prep = []
     pred_traj_prep = []
@@ -579,6 +578,14 @@ def animate_trajectories(orig_trajectory, pred_trajectory, path='./traj_anim.gif
                                    value=border_color)
         pred_traj_prep.append(image)
 
+    return gt_traj_prep, pred_traj_prep
+
+
+def animate_trajectories(orig_trajectory, pred_trajectory, path='./traj_anim.gif', duration=4 / 50, rec_to_pred_t=10,
+                         title=None):
+    # rec_to_pred_t: the timestep from which prediction transitions from reconstruction to generation
+    # prepare images
+    gt_traj_prep, pred_traj_prep = put_labels(orig_trajectory, pred_trajectory, rec_to_pred_t)
     total_images = []
     for i in range(len(orig_trajectory)):
         white_border = (np.ones((gt_traj_prep[i].shape[0], 4, gt_traj_prep[i].shape[-1])) * 255).astype(np.uint8)

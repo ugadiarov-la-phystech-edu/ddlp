@@ -3142,3 +3142,91 @@ class ObjectDynamicsDLP(nn.Module):
             other_param = other.parameters()
             for p, p_other in zip(params, other_param):
                 p.data.lerp_(p_other.data, 1.0 - betta)
+
+    def predict(self, x, action=None, num_steps=None, deterministic=True, bg_masks_from_fg=False, return_z=False,
+                return_debug=False):
+        """
+        (Conditioanl) Sampling from DDLP: x is the conditional frames, encoded to latent particles
+         which are unrolled to the future with PINT, and the predicted particles are then decoded to a sequence
+         of RGB images.
+        """
+        assert self.dynamics, f'Can sample only from dynamics model, but self.dynamics={self.dynamics}'
+        if self.action_dim is not None:
+            if action is None:
+                raise ValueError(f'Must provide actions for action-conditioned model')
+
+        if self.action_dim is None:
+            if num_steps is None:
+                raise ValueError(f'Must provide num_steps for video prediction model')
+
+        # x: [bs, T, ...]
+        # encode-decode
+        batch_size, timestep_horizon = x.size(0), x.size(1)
+        num_steps = action.size()[1] - timestep_horizon + 1
+        # sequential
+        fg_dict = self.fg_sequential_opt(x, deterministic=deterministic, x_prior=x, reshape=True)
+        x_in = x.reshape(-1, *x.shape[2:])  # [batch_size_all * timestep_horizon, ...]
+        # encoder
+        z = fg_dict['z']
+        z_features = fg_dict['z_features']
+        z_obj_on = fg_dict['obj_on']
+        z_depth = fg_dict['z_depth']
+        z_scale = fg_dict['z_scale']
+
+        # decoder
+        bg_mask = fg_dict['bg_mask']
+        dec_objects_trans = fg_dict['dec_objects']
+
+        if bg_masks_from_fg:
+            bg_enc_mask = bg_mask
+        else:
+            bg_enc_mask = self.get_bg_mask_from_particle_glimpses(z, z_obj_on, mask_size=x_in.shape[-1])
+        bg_dict = self.bg_module(x_in, bg_enc_mask, deterministic)
+        z_bg = bg_dict['z_bg']
+        bg = bg_dict['bg_rec']
+
+        # stitch
+        rec = bg_mask * bg + dec_objects_trans
+        rec = rec.view(batch_size, timestep_horizon, *rec.shape[1:])
+
+        z_v = z.view(batch_size, timestep_horizon, *z.shape[1:])
+        z_scale_v = z_scale.view(batch_size, timestep_horizon, *z_scale.shape[1:])
+        z_obj_on_v = z_obj_on.view(batch_size, timestep_horizon, *z_obj_on.shape[1:])
+        z_depth_v = z_depth.view(batch_size, timestep_horizon, *z_depth.shape[1:])
+        z_features_v = z_features.view(batch_size, timestep_horizon, *z_features.shape[1:])
+        z_bg_features_v = z_bg.view(batch_size, timestep_horizon, *z_bg.shape[1:])
+
+        # dynamics
+        dyn_out = self.dyn_module.sample(z_v, z_scale_v, z_obj_on_v, z_depth_v, z_features_v, z_bg_features_v,
+                                         steps=num_steps, deterministic=deterministic, action=action)
+        z_dyn, z_scale_dyn, z_obj_on_dyn, z_depth_dyn, z_features_dyn, z_bg_features_dyn = dyn_out
+        if return_z:
+            z_ids = 1 + torch.arange(z_dyn.shape[2], device=z_dyn.device)  # num_particles, ids start from 1
+            z_ids = z_ids[None, None, :].repeat(z_dyn.shape[0], z_dyn.shape[1], 1)  # [bs, T, n_particles]
+            z_out = {'z_pos': z_dyn.detach(), 'z_scale': z_scale_dyn.detach(), 'z_obj_on': z_obj_on_dyn.detach(),
+                     'z_depth': z_depth_dyn.detach(), 'z_features': z_features_dyn.detach(),
+                     'z_bg_features': z_bg_features_dyn.detach(), 'z_ids': z_ids}
+        # decode
+        z_dyn = z_dyn[:, -num_steps:].reshape(-1, *z_dyn.shape[2:])
+        z_features_dyn = z_features_dyn[:, -num_steps:].reshape(-1, *z_features_dyn.shape[2:])
+        z_bg_features_dyn = z_bg_features_dyn[:, -num_steps:].reshape(-1, *z_bg_features_dyn.shape[2:])
+        z_obj_on_dyn = z_obj_on_dyn[:, -num_steps:].reshape(-1, *z_obj_on_dyn.shape[2:])
+        z_depth_dyn = z_depth_dyn[:, -num_steps:].reshape(-1, *z_depth_dyn.shape[2:])
+        z_scale_dyn = z_scale_dyn[:, -num_steps:].reshape(-1, *z_scale_dyn.shape[2:])
+        dec_out = self.decode_all(z_dyn, z_features_dyn, z_bg_features_dyn, z_obj_on_dyn,
+                                  z_depth=z_depth_dyn, z_scale=z_scale_dyn)
+        rec_dyn = dec_out['rec']
+        rec_dyn = rec_dyn.reshape(batch_size, -1, *rec_dyn.shape[1:])
+        rec_dyn = rec_dyn.reshape(batch_size, num_steps, *rec_dyn.shape[2:])
+        rec = torch.cat([rec, rec_dyn], dim=1)
+        assert (batch_size, timestep_horizon + num_steps) == rec.size()[:2], "prediction and gt frames shape don't match"
+
+        result = [rec]
+        if return_z:
+            result.append({k: v.reshape(batch_size, timestep_horizon + 1, *v.shape[2:]) for k, v in z_out.items()})
+
+        if return_debug:
+            result.append({k: v.reshape(batch_size, timestep_horizon, *v.shape[1:]) for k, v in fg_dict.items()})
+            result.append(rec_dyn)
+
+        return result

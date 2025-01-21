@@ -471,9 +471,9 @@ class DynamicsDLP(nn.Module):
             z_depth_v = z_depth[:, -block_size:].reshape(-1, *z_depth.shape[2:])
             z_features_v = z_features[:, -block_size:].reshape(-1, *z_features.shape[2:])
             z_bg_features_v = z_bg_features[:, -block_size:].reshape(-1, *z_bg_features.shape[2:])
-            action = action[:, -block_size:].reshape(-1, *action.shape[2:])
+            step_action = action[:, k: k + block_size].reshape(-1, *action.shape[2:])
             particle_projection = self.particle_projection(z_v, z_scale_v, z_obj_on_v, z_depth_v, z_features_v,
-                                                           z_bg_features_v, action=action)
+                                                           z_bg_features_v, action=step_action)
             # [bs * T, n_particles + 1 + 1, projection_dim]
             particle_proj_int = particle_projection
 
