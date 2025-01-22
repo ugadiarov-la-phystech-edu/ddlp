@@ -26,7 +26,7 @@ from datasets.get_dataset import get_video_dataset
 # util functions
 from utils.util_func import plot_keypoints_on_image_batch, prepare_logdir, save_config, log_line, \
     plot_bb_on_image_batch_from_z_scale_nms, plot_bb_on_image_batch_from_masks_nms, get_config, save, wandb_log
-from eval.eval_model import evaluate_validation_elbo_dyn, animate_trajectory_ddlp
+from eval.eval_model import evaluate_validation_elbo_dyn, animate_trajectory_ddlp_prediction_horizon
 from eval.eval_gen_metrics import eval_ddlp_im_metric
 
 matplotlib.use("Agg")
@@ -123,9 +123,12 @@ def train_ddlp(config_path='./configs/balls.json', num_workers=4):
     predict_delta = config['predict_delta']  # dynamics module predicts the delta from previous step
     start_epoch = config['start_dyn_epoch']
 
+    prediction_horizon = config.get("prediction_horizon", 1)
+    n_duplicate_on_episode_start = timestep_horizon - 1 if duplicate_on_episode_start else 0
+
     # load data
-    dataset = get_video_dataset(ds, root, seq_len=timestep_horizon + int(dynamics), mode='train', image_size=image_size,
-                                use_actions=use_actions, duplicate_on_episode_start=duplicate_on_episode_start)
+    dataset = get_video_dataset(ds, root, seq_len=timestep_horizon + prediction_horizon, mode='train', image_size=image_size,
+                                use_actions=use_actions, n_duplicate_on_episode_start=n_duplicate_on_episode_start)
     dataloader = DataLoader(dataset, shuffle=True, batch_size=batch_size, num_workers=num_workers, pin_memory=True,
                             drop_last=True)
 
@@ -206,7 +209,7 @@ def train_ddlp(config_path='./configs/balls.json', num_workers=4):
     iter_per_epoch = 1 * len(dataloader)
     dynamics_warmup_iters = max(warmup_epoch, 1) * max(10_000, iter_per_epoch)
     iter_per_step = dynamics_warmup_iters // timestep_horizon
-    max_iterations_per_step = [iter_per_step * (i + 1) for i in range(timestep_horizon)]
+    max_iterations_per_step = [iter_per_step * (i + 1) for i in range(timestep_horizon + prediction_horizon)]
     iteration = 0  # initialize iterations counter
 
     for epoch in range(pretrained_epoch, num_epochs):
@@ -439,9 +442,9 @@ def train_ddlp(config_path='./configs/balls.json', num_workers=4):
 
             if dynamics:
                 try:
-                    animation_paths = animate_trajectory_ddlp(model, config, epoch, device=device, fig_dir=fig_dir,
-                                                              timestep_horizon=animation_horizon, num_trajetories=1, train=True,
-                                                              cond_steps=cond_steps, teacher_forcing=True)
+                    animation_paths = animate_trajectory_ddlp_prediction_horizon(model, config, epoch,
+                                                                                 prediction_horizon, device=device,
+                                                                                 fig_dir=fig_dir, train=True, )
                     for path_id, animation_path in enumerate(animation_paths):
                         log_data[f'video_{path_id:02d}'] = wandb.Video(animation_path)
 
@@ -453,12 +456,11 @@ def train_ddlp(config_path='./configs/balls.json', num_workers=4):
             do_save_best_weights = False
             valid_log_data = {}
             try:
-                result = evaluate_validation_elbo_dyn(model, config, epoch, batch_size=batch_size,
+                result = evaluate_validation_elbo_dyn(model, config, epoch, prediction_horizon, batch_size=batch_size,
                                                       recon_loss_type=recon_loss_type, device=device,
                                                       save_image=True, fig_dir=fig_dir, topk=topk,
                                                       recon_loss_func=recon_loss_func, beta_rec=beta_rec,
                                                       beta_dyn=beta_dyn, iou_thresh=iou_thresh,
-                                                      timestep_horizon=timestep_horizon, animation_horizon=animation_horizon,
                                                       beta_kl=beta_kl, kl_balance=kl_balance, beta_dyn_rec=beta_dyn_rec,
                                                       use_actions=use_actions)
                 valid_loss = result['elbos']

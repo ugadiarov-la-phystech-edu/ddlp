@@ -1,6 +1,7 @@
 """
 Evaluation of the ELBO on the validation set
 """
+import imageio
 # imports
 import numpy as np
 import os
@@ -14,7 +15,7 @@ import torchvision.utils as vutils
 from datasets.get_dataset import get_video_dataset, get_image_dataset
 # util functions
 from utils.util_func import plot_keypoints_on_image_batch, animate_trajectories, \
-    plot_bb_on_image_batch_from_z_scale_nms, plot_bb_on_image_batch_from_masks_nms
+    plot_bb_on_image_batch_from_z_scale_nms, plot_bb_on_image_batch_from_masks_nms, put_labels
 
 
 def evaluate_validation_elbo(model, config, epoch, batch_size=100, recon_loss_type="vgg", device=torch.device('cpu'),
@@ -182,12 +183,11 @@ def evaluate_validation_elbo(model, config, epoch, batch_size=100, recon_loss_ty
     return result
 
 
-def evaluate_validation_elbo_dyn(model, config, epoch, batch_size=100, recon_loss_type="vgg",
+def evaluate_validation_elbo_dyn(model, config, epoch, prediction_horizon, batch_size=100, recon_loss_type="vgg",
                                  device=torch.device('cpu'),
                                  save_image=False, fig_dir='./', topk=5, recon_loss_func=None, beta_rec=1.0,
                                  beta_kl=1.0, beta_dyn=1.0, iou_thresh=0.2, beta_dyn_rec=1.0,
-                                 kl_balance=1.0, accelerator=None, timestep_horizon=10,
-                                 animation_horizon=50, use_actions=False):
+                                 kl_balance=1.0, accelerator=None, use_actions=False):
     model.eval()
     kp_range = model.kp_range
     # load data
@@ -195,19 +195,20 @@ def evaluate_validation_elbo_dyn(model, config, epoch, batch_size=100, recon_los
     ch = config['ch']  # image channels
     image_size = config['image_size']
     root = config['root']  # dataset root
-    cond_steps = config['cond_steps']  # dataset root
-    dataset = get_video_dataset(ds, root, seq_len=timestep_horizon + int(model.dynamics), mode='valid', image_size=image_size,
-                                use_actions=use_actions, episodic_on_val=False)
+    timestep_horizon = model.timestep_horizon
+    dataset = get_video_dataset(ds, root, seq_len=timestep_horizon + prediction_horizon, mode='valid',
+                                image_size=image_size, use_actions=use_actions, episodic_on_val=False)
 
     dataloader = DataLoader(dataset, shuffle=True, batch_size=batch_size, num_workers=4, drop_last=False)
 
     elbos = []
     for batch in dataloader:
-        x = batch.img[:, :timestep_horizon + int(model.dynamics)].to(device)
-        action = batch.action[:, :timestep_horizon].to(device)
+        x = batch.img.to(device)
+        action = batch.action.to(device)
         x_prior = x
         with torch.no_grad():
-            model_output = model(x, action=action if use_actions else None, x_prior=x_prior, predict_next=model.dynamics)
+            model_output = model(x, action=action if use_actions else None, x_prior=x_prior, predict_next=model.dynamics,
+                                 num_static_frames=config['num_static_frames'])
             # calc elbo
             losses = model.calc_elbo(x, model_output, beta_kl=beta_kl,
                                      beta_dyn=beta_dyn, beta_rec=beta_rec, kl_balance=kl_balance,
@@ -339,11 +340,9 @@ def evaluate_validation_elbo_dyn(model, config, epoch, batch_size=100, recon_los
             result['image_obj_path'] = image_obj_path
 
         if model.dynamics:
-            animation_paths = animate_trajectory_ddlp(model, config, epoch, device=device, fig_dir=fig_dir,
-                                                      prefix='valid_', timestep_horizon=animation_horizon,
-                                                      num_trajetories=1, accelerator=accelerator, train=False,
-                                                      cond_steps=cond_steps, teacher_forcing=True)
-
+            animation_paths = animate_trajectory_ddlp_prediction_horizon(model, config, epoch,
+                                                                         prediction_horizon, device=device,
+                                                                         fig_dir=fig_dir, train=False, prefix='valid_')
             result['animation_paths'] = animation_paths
     return result
 
@@ -392,3 +391,47 @@ def animate_trajectory_ddlp(model, config, epoch, device=torch.device('cpu'), fi
             animate_trajectories(gt_traj, pred_traj, path=path, duration=duration, rec_to_pred_t=cond_steps)
 
     return paths
+
+
+def animate_trajectory_ddlp_prediction_horizon(model, config, epoch, prediction_horizon, device=torch.device('cpu'),
+                                               fig_dir='./', train=False, prefix='', deterministic=True,
+                                               n_reconstruction_frames=0):
+    # load data
+    ds = config['ds']
+    ch = config['ch']  # image channels
+    image_size = config['image_size']
+    root = config['root']  # dataset root
+    fps = config['animation_fps']
+
+    mode = 'train' if train else "valid"
+    use_actions = config.get("use_actions", False)
+    timestep_horizon = model.timestep_horizon
+    dataset = get_video_dataset(ds, root, seq_len=timestep_horizon + prediction_horizon, mode=mode, image_size=image_size,
+                                use_actions=use_actions, episodic_on_train=True, episodic_on_val=True)
+    dataloader = DataLoader(dataset, shuffle=True, batch_size=1, num_workers=4, drop_last=False)
+    batch = next(iter(dataloader))
+    model.eval()
+    xs = batch.img[0].unfold(0, timestep_horizon + prediction_horizon, 1).movedim(-1, 1).to(device)
+    actions = batch.action[0].unfold(0, timestep_horizon + prediction_horizon, 1).movedim(-1, 1).to(device)
+
+    all_gt_images = []
+    all_pred_images = []
+    for x, action in zip(xs, actions):
+        x_in = x[:timestep_horizon].unsqueeze(0)
+        action = action.unsqueeze(0)
+        with torch.no_grad():
+            pred = model.predict(x_in, action=action, num_steps=None, deterministic=deterministic,
+                                 bg_masks_from_fg=False, return_z=False, return_debug=False)[0]
+        x = x.movedim(1, -1).detach().cpu().numpy()[timestep_horizon - n_reconstruction_frames:]
+        pred = pred.squeeze(0).movedim(1, -1).detach().cpu().numpy()[timestep_horizon - n_reconstruction_frames:]
+        gt_images, pred_images = put_labels(x, pred, n_reconstruction_frames, border_size=0)
+        all_gt_images.extend(gt_images)
+        all_pred_images.extend(pred_images)
+
+    all_gt_images = np.asarray(all_gt_images)
+    all_pred_images = np.asarray(all_pred_images)
+    images = np.concatenate([all_gt_images, all_pred_images], axis=2)
+    path = os.path.join(fig_dir, f'{prefix}e{epoch}_traj_anim_{0}.mp4')
+    imageio.mimsave(path, images, quality=10, fps=fps)
+
+    return [path]

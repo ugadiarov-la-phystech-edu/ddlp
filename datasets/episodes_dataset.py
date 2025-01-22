@@ -18,7 +18,7 @@ ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 class EpisodesDataset(Dataset):
     def __init__(self, root, mode, sample_length=1, res=128, episodic_on_train=False, episodic_on_val=False,
-                 use_actions=False, duplicate_on_episode_start=False):
+                 use_actions=False, n_duplicate_on_episode_start=0):
         assert mode in ['train', 'val', 'valid']
         if mode == 'valid':
             mode = 'val'
@@ -29,8 +29,8 @@ class EpisodesDataset(Dataset):
         self.mode = mode
         self.episodic = (self.mode == 'train' and episodic_on_train) or (self.mode == 'val' and episodic_on_val)
         self.sample_length = sample_length
-        self.duplicate_on_episode_start = duplicate_on_episode_start
-        assert sample_length > 1 or not duplicate_on_episode_start, 'Duplication can be used only for video'
+        self.n_duplicate_on_episode_start = n_duplicate_on_episode_start
+        assert sample_length > 1 or n_duplicate_on_episode_start == 0, 'Duplication can be used only for video'
 
         # Get all numbers
         self.folders = []
@@ -59,9 +59,7 @@ class EpisodesDataset(Dataset):
                     f'Drop episode {dir_name} with length={len(paths)} as it too short for sample_length={self.sample_length}')
                 continue
 
-            if self.duplicate_on_episode_start:
-                actual_length = len(paths) - 1
-
+            actual_length += self.n_duplicate_on_episode_start
             if self.use_actions:
                 actions_path = os.path.join(dir_name, 'actions.npy')
                 assert os.path.exists(actions_path), f'{os.path.abspath(actions_path)} does not exists.'
@@ -106,12 +104,8 @@ class EpisodesDataset(Dataset):
             ep = self.index2episode[index]
             # Implement continuous indexing
             offset = self.episode2offset[ep]
-            if self.duplicate_on_episode_start:
-                end = (index + 1) - offset + 1
-                begin = end - self.sample_length
-            else:
-                begin = index - offset
-                end = begin + self.sample_length
+            begin = index - offset - self.n_duplicate_on_episode_start
+            end = begin + self.sample_length
 
         if self.use_actions:
             actual_begin = max(begin, 0)
@@ -121,8 +115,9 @@ class EpisodesDataset(Dataset):
 
             action = action.to(torch.float32)
             if actual_begin != begin:
-                assert self.duplicate_on_episode_start
-                empty_action = torch.zeros(size=(actual_begin - begin, *action.size()[1:]), dtype=action.dtype)
+                n = actual_begin - begin
+                assert n <= self.n_duplicate_on_episode_start
+                empty_action = torch.zeros(size=(n, *action.size()[1:]), dtype=action.dtype)
                 action = torch.cat([empty_action, action], dim=0)
         else:
             action = torch.zeros(0)
@@ -130,7 +125,7 @@ class EpisodesDataset(Dataset):
         revered_sequence_images = []
         for image_index in reversed(range(begin, end)):
             if image_index < 0:
-                assert self.duplicate_on_episode_start
+                assert -image_index <= self.n_duplicate_on_episode_start
                 revered_sequence_images.append(revered_sequence_images[-1])
             else:
                 img = Image.open(self.episode_images[ep][image_index])
@@ -157,6 +152,7 @@ if __name__ == '__main__':
     parser.add_argument('--episodic_on_train', action='store_true')
     parser.add_argument('--episodic_on_val', action='store_true')
     parser.add_argument('--use_actions', action='store_true')
+    parser.add_argument('--n_duplicate_on_episode_start', type=int, default=0)
 
     args = parser.parse_args()
     root = args.path
@@ -166,7 +162,10 @@ if __name__ == '__main__':
     use_actions = args.use_actions
     sample_length = args.sample_length
     ds = EpisodesDataset(root, mode, sample_length=sample_length, res=64, episodic_on_val=episodic_on_val,
-                         episodic_on_train=episodic_on_train, use_actions=use_actions)
+                         episodic_on_train=episodic_on_train, use_actions=use_actions,
+                         n_duplicate_on_episode_start=args.n_duplicate_on_episode_start)
     print('Length:', len(ds))
     element = ds[0]
     print('Shape:', element.img.size(), 'Mean:', element.img.mean())
+    for i in range(len(ds)):
+        ds[0]
