@@ -210,7 +210,7 @@ def train_ddlp(config_path='./configs/balls.json', num_workers=4):
     dynamics_warmup_iters = max(warmup_epoch, 1) * max(10_000, iter_per_epoch)
     iter_per_step = dynamics_warmup_iters // timestep_horizon
     max_iterations_per_step = [iter_per_step * (i + 1) for i in range(timestep_horizon + prediction_horizon)]
-    iteration = 0  # initialize iterations counter
+    iteration = iter_per_epoch * max(0, pretrained_epoch - 1 - start_epoch)  # initialize iterations counter
 
     for epoch in range(pretrained_epoch, num_epochs):
         model.train()
