@@ -17,6 +17,17 @@ from tqdm import tqdm
 from models import ObjectDynamicsDLP
 
 
+def str2bool(v):
+    if isinstance(v, bool):
+        return v
+    if v.lower() in ('yes', 'true', 't', 'y', '1'):
+        return True
+    elif v.lower() in ('no', 'false', 'f', 'n', '0'):
+        return False
+    else:
+        raise argparse.ArgumentTypeError('Boolean value expected.')
+
+
 def create_ddlp(config_path):
     with open(config_path, 'r') as f:
         config = json.load(f)
@@ -70,6 +81,7 @@ def create_ddlp(config_path):
     filtering_heuristic = config["filtering_heuristic"]  # filtering heuristic to filter prior keypoints
     use_actions = config.get("use_actions", False)  # use action-conditioned dynamics model
     max_beta_coef = config.get("max_beta_coef", 100)
+    duplicate_on_episode_start = config.get("duplicate_on_episode_start", False) # populate the context with duplicated frame in the beginning of the episode
 
     # optimization
     warmup_epoch = config['warmup_epoch']
@@ -90,6 +102,7 @@ def create_ddlp(config_path):
     obj_on_beta = config['obj_on_beta']  # transparency beta distribution "b"
 
     # transformer - PINT
+    dynamics = config.get('dynamics', True)
     pint_layers = config['pint_layers']
     pint_heads = config['pint_heads']
     pint_dim = config['pint_dim']
@@ -107,7 +120,8 @@ def create_ddlp(config_path):
                               obj_on_beta=obj_on_beta, pint_layers=pint_layers, pint_heads=pint_heads,
                               pint_dim=pint_dim, use_correlation_heatmaps=use_correlation_heatmaps,
                               enable_enc_attn=enable_enc_attn, filtering_heuristic=filtering_heuristic,
-                              max_beta_coef=max_beta_coef, action_dim=action_dim, mu_scale_prior=mu_scale_prior)
+                              max_beta_coef=max_beta_coef, action_dim=action_dim, mu_scale_prior=mu_scale_prior,
+                              dynamics=dynamics)
 
     return model, config
 
@@ -127,15 +141,15 @@ def load_checkpoint(model, checkpoint_path):
     return model
 
 
-def get_fg_representation(dlp_output, timestep_horizon):
+def get_fg_representation(dlp_output):
     rep = torch.cat((dlp_output['z'], dlp_output['mu_scale'], dlp_output['mu_depth'], dlp_output['mu_features'],
                      dlp_output['obj_on'].unsqueeze(dim=-1)), dim=-1).detach().cpu().numpy()
-    return rep.reshape((-1, timestep_horizon + 1, *rep.shape[1:]))[:, :timestep_horizon]
+    return rep
 
 
-def get_bg_representation(dlp_output, timestep_horizon):
+def get_bg_representation(dlp_output):
     rep = dlp_output['z_bg'].detach().cpu().numpy()
-    return rep.reshape((-1, timestep_horizon + 1, *rep.shape[1:]))[:, :timestep_horizon]
+    return rep
 
 
 def get_episode_ids(dataset_path, split):
@@ -191,6 +205,7 @@ if __name__ == '__main__':
     parser.add_argument('--max_write_workers', type=int, default=1)
     parser.add_argument('--batch_size', type=int, default=32)
     parser.add_argument('--device', type=str, default='cuda')
+    parser.add_argument('--use_autoregression', type=str2bool, default=False)
     args = parser.parse_args()
 
     os.makedirs(args.target_dataset_path, exist_ok=False)
@@ -224,27 +239,72 @@ if __name__ == '__main__':
             break
 
         # extract data from episode
+        timestep_horizon = model.timestep_horizon
         data = read_futures.popleft().result()
         x = data['images'].to(args.device)
-        x = torch.cat([x[:1].expand((model.timestep_horizon - 1, -1, -1, -1)), x], dim=0)
-        x = x.unfold(dimension=0, size=model.timestep_horizon + 1, step=1).permute((0, 4, 1, 2, 3)).contiguous()
         foreground_representations = []
         background_representations = []
-        for batch in torch.split(x, args.batch_size):
-            dlp_output = model(batch, deterministic=True, x_prior=batch, warmup=False, noisy=False, forward_dyn=True,
-                               train_enc_prior=config['train_enc_prior'], num_static_frames=config['num_static_frames'],
-                               predict_next=False)
-            foreground_representations.append(get_fg_representation(dlp_output, model.timestep_horizon))
-            background_representations.append(get_bg_representation(dlp_output, model.timestep_horizon))
+        if args.use_autoregression:
+            start_image = x[:1].expand(timestep_horizon + 1, -1, -1, -1).unsqueeze(0)
+            dlp_output = model(start_image, deterministic=True, x_prior=start_image, warmup=False, noisy=False, predict_next=False,
+                                   sequential=True, train_enc_prior=config['train_enc_prior'],
+                                   num_static_frames=config['num_static_frames'])
 
-        foreground_representations = np.concatenate(foreground_representations)
-        background_representations = np.concatenate(background_representations)
+            z_prev = dlp_output['z'][-1:]
+            z_scale_prev = dlp_output['z_scale'][-1:]
+            cropped_objects_prev = dlp_output['cropped_objects_original'][-1:]
+            fg = torch.cat((dlp_output['z'][-1], dlp_output['mu_scale'][-1],
+                                                    dlp_output['mu_depth'][-1], dlp_output['mu_features'][-1],
+                                                    dlp_output['obj_on'][-1].unsqueeze(dim=-1)),
+                                                   dim=-1).detach().cpu().numpy()
+            bg = dlp_output['z_bg'][-1].detach().cpu().numpy()
+            foreground_representations.append(fg)
+            background_representations.append(bg)
+
+            for step_image in x[1:]:
+                step_image = step_image.unsqueeze(0)
+                fg_dict = model.fg_module.encode_all(step_image, deterministic=False, warmup=False, noisy=False, kp_init=z_prev,
+                                                     cropped_objects_prev=cropped_objects_prev.flatten(end_dim=1),
+                                                     scale_prev=z_scale_prev, refinement_iter=False)
+                z = fg_dict['z']
+                z_obj_on = fg_dict['obj_on']
+                mu_scale = fg_dict['mu_scale'][0]
+                mu_depth = fg_dict['mu_depth'][0]
+                mu_features = fg_dict['mu_features'][0]
+                fg = torch.cat((z[0], mu_scale, mu_depth, mu_features, z_obj_on[0].unsqueeze(dim=-1)), dim=-1).detach().cpu().numpy()
+                foreground_representations.append(fg)
+
+                bg_enc_mask = model.get_bg_mask_from_particle_glimpses(z, z_obj_on, mask_size=step_image.shape[-1])
+                bg_dict = model.bg_module(step_image, bg_enc_mask, deterministic=False)
+                bg = bg_dict['z_bg'][0].detach().cpu().numpy()
+                background_representations.append(bg)
+
+                z_prev = z
+                cropped_objects_prev = fg_dict['cropped_objects']
+                z_scale_prev = fg_dict['z_scale']
+        else:
+            x = torch.cat([x[:1].expand((model.timestep_horizon, -1, -1, -1)), x], dim=0)
+            x = x.unfold(dimension=0, size=model.timestep_horizon + 1, step=1).permute((0, 4, 1, 2, 3)).contiguous()
+            for batch in torch.split(x, args.batch_size):
+                dlp_output = model(batch, deterministic=True, x_prior=batch, warmup=False, noisy=False, predict_next=False,
+                                   sequential=True, train_enc_prior=config['train_enc_prior'],
+                                   num_static_frames=config['num_static_frames'])
+                fg = get_fg_representation(dlp_output)
+                foreground_representations.append(fg.reshape((-1, timestep_horizon + 1, *fg.shape[1:]))[:, :timestep_horizon])
+                bg = get_bg_representation(dlp_output)
+                background_representations.append(bg.reshape((-1, timestep_horizon + 1, *bg.shape[1:]))[:, :timestep_horizon])
+
+            foreground_representations = np.concatenate(foreground_representations)
+            background_representations = np.concatenate(background_representations)
+
         actions = data['actions']
-        actions = np.concatenate(
-            [np.zeros((model.timestep_horizon - 1, *actions.shape[1:]), dtype=np.float32,), actions],
-            axis=0
-        )
-        actions = sliding_window_view(actions, window_shape=model.timestep_horizon, axis=0).transpose((0, 2, 1))
+        if not args.use_autoregression:
+            actions = np.concatenate(
+                [np.zeros((model.timestep_horizon - 1, *actions.shape[1:]), dtype=np.float32,), actions],
+                axis=0
+            )
+            actions = sliding_window_view(actions, window_shape=model.timestep_horizon, axis=0).transpose((0, 2, 1))
+
         write_futures.append(write_executor.submit(
             write_episode_data,
             os.path.join(args.target_dataset_path, f'{data["split"]}.hdf5'),
