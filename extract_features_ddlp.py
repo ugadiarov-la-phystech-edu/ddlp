@@ -205,6 +205,7 @@ if __name__ == '__main__':
     parser.add_argument('--batch_size', type=int, default=32)
     parser.add_argument('--device', type=str, default='cuda')
     parser.add_argument('--use_autoregression', type=str2bool, default=False)
+    parser.add_argument('--action_history', type=str2bool, default=False)
     args = parser.parse_args()
 
     os.makedirs(args.target_dataset_path, exist_ok=False)
@@ -268,20 +269,30 @@ if __name__ == '__main__':
                 z_prev = fg_dict['z']
                 cropped_objects_prev = fg_dict['cropped_objects']
                 z_scale_prev = fg_dict['z_scale']
+
+            representations = {k: np.stack(v) for k, v in representations.items()}
+            representations = {k: v.reshape((*v.shape[:2], -1)) for k, v in representations.items()}
         else:
-            x = torch.cat([x[:1].expand((model.timestep_horizon, -1, -1, -1)), x], dim=0)
-            x = x.unfold(dimension=0, size=model.timestep_horizon + 1, step=1).permute((0, 4, 1, 2, 3)).contiguous()
+            x = torch.cat([x[:1].expand((model.timestep_horizon - 1, -1, -1, -1)), x], dim=0)
+            x = x.unfold(dimension=0, size=model.timestep_horizon, step=1).permute((0, 4, 1, 2, 3)).contiguous()
             for batch in torch.split(x, args.batch_size):
                 dlp_output = model(batch, deterministic=True, x_prior=batch, warmup=False, noisy=False, predict_next=False,
                                    sequential=True, train_enc_prior=config['train_enc_prior'],
                                    num_static_frames=config['num_static_frames'])
                 for key in ('z', 'mu_scale', 'mu_depth', 'mu_features', 'obj_on', 'z_bg'):
-                    representations[key].append(dlp_output[key].detach().cpu().numpy())
+                    value = dlp_output[key].detach().cpu().numpy()
+                    value = value.reshape((*batch.size()[:2], *value.shape[1:]))
+                    if key == 'obj_on':
+                        value = np.expand_dims(value, axis=-1)
+                    if key == 'z_bg':
+                        value = np.expand_dims(value, axis=-2)
 
-        representations = {k: np.stack(v) for k, v in representations.items()}
-        representations = {k: v.reshape((*v.shape[:2], -1)) for k, v in representations.items()}
+                    representations[key].append(value)
+
+            representations = {k: np.concatenate(v) for k, v in representations.items()}
+
         actions = data['actions']
-        if not args.use_autoregression:
+        if args.action_history:
             actions = np.concatenate(
                 [np.zeros((model.timestep_horizon - 1, *actions.shape[1:]), dtype=np.float32,), actions],
                 axis=0
