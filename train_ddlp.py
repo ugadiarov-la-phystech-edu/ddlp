@@ -42,6 +42,7 @@ def train_ddlp(config_path='./configs/balls.json', num_workers=4):
         raise SystemExit("config file not found")
     hparams = config  # to save a copy of the hyper-parameters
     # data and general
+    do_train = config.get('do_train', True)
     ds = config['ds']
     ch = config['ch']  # image channels
     image_size = config['image_size']
@@ -191,6 +192,8 @@ def train_ddlp(config_path='./configs/balls.json', num_workers=4):
         best_val_lpips_epoch = checkpoint['best_val_lpips_epoch']
         print(f"loaded model from checkpoint: {pretrained_path}")
 
+    model.requires_grad_(do_train)
+
     # log statistics
     losses = []
     losses_rec = []
@@ -261,10 +264,11 @@ def train_ddlp(config_path='./configs/balls.json', num_workers=4):
                                                     recon_loss_func=recon_loss_func, noisy=noisy)
 
             loss = all_losses['loss']
-            optimizer.zero_grad()
-            loss.backward()
-            batch_grad_norms.append(torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=max_norm).item())
-            optimizer.step()
+            if do_train:
+                optimizer.zero_grad()
+                loss.backward()
+                batch_grad_norms.append(torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=max_norm).item())
+                optimizer.step()
 
             # output for logging and plotting
             mu_p = model_output['kp_p']
@@ -339,8 +343,8 @@ def train_ddlp(config_path='./configs/balls.json', num_workers=4):
                     'kl_scale': losses_kl_scale[-1], 'kl_depth': losses_kl_depth[-1], 'kl_obj_on': losses_kl_obj_on[-1],
                     'kl_dyn': losses_kl_dyn[-1], 'mu max': mu_tot.max(), 'mu min': mu_tot.min(),
                     'mu offset max': mu_offset.max(), 'mu offset min': mu_offset.min(),
-                    'min_grad_norm': batch_grad_norms.min(), 'mean_grad_norm': batch_grad_norms.mean(),
-                    'max_grad_norm': batch_grad_norms.max(),
+                    'min_grad_norm': batch_grad_norms.min(initial=np.inf), 'mean_grad_norm': batch_grad_norms.mean(),
+                    'max_grad_norm': batch_grad_norms.max(initial=-np.inf),
                     }
 
         # epoch summary
