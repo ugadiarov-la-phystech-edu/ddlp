@@ -206,6 +206,7 @@ if __name__ == '__main__':
     parser.add_argument('--device', type=str, default='cuda')
     parser.add_argument('--use_autoregression', type=str2bool, default=False)
     parser.add_argument('--action_history', type=str2bool, default=False)
+    parser.add_argument('--prediction_horizon', type=int, default=0)
     args = parser.parse_args()
 
     os.makedirs(args.target_dataset_path, exist_ok=False)
@@ -272,6 +273,61 @@ if __name__ == '__main__':
 
             representations = {k: np.stack(v) for k, v in representations.items()}
             representations = {k: v.reshape((*v.shape[:2], -1)) for k, v in representations.items()}
+        elif args.prediction_horizon > 0:
+            actions = torch.as_tensor(data['actions'], device=args.device)
+            actions = torch.cat(
+                [torch.zeros(model.timestep_horizon - 1, *actions.size()[1:], dtype=actions.dtype, device=actions.device), actions],
+                dim=0)
+            actions = actions.unfold(dimension=0, size=model.timestep_horizon + args.prediction_horizon - 1, step=1).permute(
+                (0, 2, 1)).contiguous()
+            x = torch.cat([x[:1].expand((model.timestep_horizon - 1, -1, -1, -1)), x], dim=0)
+            x = x.unfold(dimension=0, size=model.timestep_horizon, step=1).permute((0, 4, 1, 2, 3))[:actions.size()[0]].contiguous()
+            rewards = torch.as_tensor(data['rewards'])
+            rewards = rewards.unfold(dimension=0, size=args.prediction_horizon, step=1)
+            for batch_indices in torch.split(torch.arange(x.size()[0], device=x.device), args.batch_size):
+                batch_x = torch.index_select(x, dim=0, index=batch_indices)
+                batch_actions = torch.index_select(actions, dim=0, index=batch_indices)
+                dlp_output = model(batch_x, deterministic=True, x_prior=batch_x, warmup=False, noisy=False, predict_next=False,
+                                   sequential=True, train_enc_prior=config['train_enc_prior'],
+                                   num_static_frames=config['num_static_frames'])
+
+                for key in ('z', 'z_scale', 'obj_on', 'z_depth', 'z_features', 'z_bg'):
+                    shape = dlp_output[key].shape
+                    dlp_output[key] = dlp_output[key].reshape(batch_indices.size()[0], model.timestep_horizon, *shape[1:])
+
+                z, z_scale, z_obj_on, z_depth, z_features, z_bg_features = model.dyn_module.sample(
+                    dlp_output['z'],
+                    dlp_output['z_scale'],
+                    dlp_output['obj_on'],
+                    dlp_output['z_depth'],
+                    dlp_output['z_features'],
+                    dlp_output['z_bg'],
+                    steps=args.prediction_horizon,
+                    deterministic=True,
+                    action=batch_actions)
+
+                z = z.unfold(dimension=1, size=model.timestep_horizon, step=1).movedim(-1, 2)[:, 1:] # only predictions
+                z_scale = z_scale.unfold(dimension=1, size=model.timestep_horizon, step=1).movedim(-1, 2)[:, 1:] # only predictions
+                z_obj_on = z_obj_on.unfold(dimension=1, size=model.timestep_horizon, step=1).movedim(-1, 2)[:, 1:] # only predictions
+                z_depth = z_depth.unfold(dimension=1, size=model.timestep_horizon, step=1).movedim(-1, 2)[:, 1:] # only predictions
+                z_features = z_features.unfold(dimension=1, size=model.timestep_horizon, step=1).movedim(-1, 2)[:, 1:] # only predictions
+                z_bg_features = z_bg_features.unfold(dimension=1, size=model.timestep_horizon, step=1).movedim(-1, 2)[:, 1:] # only predictions
+                a = batch_actions.unfold(dimension=1, size=model.timestep_horizon, step=1).movedim(-1, 2)
+                r = torch.index_select(rewards, dim=0, index=batch_indices.to(rewards.device))
+
+                for key, feature in zip(('z', 'mu_scale', 'mu_depth', 'mu_features', 'obj_on', 'z_bg'), (z, z_scale, z_depth, z_features, z_obj_on, z_bg_features)):
+                    value = feature.detach().cpu().numpy()
+                    if key == 'obj_on':
+                        value = np.expand_dims(value, axis=-1)
+                    if key == 'z_bg':
+                        value = np.expand_dims(value, axis=-2)
+
+                    representations[key].append(value)
+
+                representations['actions'].append(a.cpu().numpy())
+                representations['rewards'].append(r.cpu().numpy())
+
+            representations = {k: np.concatenate(v) for k, v in representations.items()}
         else:
             x = torch.cat([x[:1].expand((model.timestep_horizon - 1, -1, -1, -1)), x], dim=0)
             x = x.unfold(dimension=0, size=model.timestep_horizon, step=1).permute((0, 4, 1, 2, 3)).contiguous()
@@ -291,13 +347,21 @@ if __name__ == '__main__':
 
             representations = {k: np.concatenate(v) for k, v in representations.items()}
 
-        actions = data['actions']
-        if args.action_history:
-            actions = np.concatenate(
-                [np.zeros((model.timestep_horizon - 1, *actions.shape[1:]), dtype=np.float32,), actions],
-                axis=0
-            )
-            actions = sliding_window_view(actions, window_shape=model.timestep_horizon, axis=0).transpose((0, 2, 1))
+        if 'actions' in representations:
+            actions = representations.pop('actions')
+        else:
+            actions = data['actions']
+            if args.action_history:
+                actions = np.concatenate(
+                    [np.zeros((model.timestep_horizon - 1, *actions.shape[1:]), dtype=np.float32,), actions],
+                    axis=0
+                )
+                actions = sliding_window_view(actions, window_shape=model.timestep_horizon + args.prediction_horizon, axis=0).transpose((0, 2, 1))
+
+        if 'rewards' in representations:
+            rewards = representations.pop('rewards')
+        else:
+            rewards = data['rewards']
 
         write_futures.append(write_executor.submit(
             write_episode_data,
@@ -305,7 +369,7 @@ if __name__ == '__main__':
             data['episode_id'],
             representations,
             actions,
-            data['rewards'],
+            rewards,
         ))
 
         processed_pbar.update(1)
